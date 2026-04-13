@@ -28,6 +28,15 @@ from typing import Optional
 import numpy as np
 from numpy.typing import NDArray
 
+import json
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from data_pipeline.evaluate_charger_placement import evaluate_charger_placement
+except ImportError:
+    pass
+
 # ─────────────────────────────────────────────────────────────────────
 # Logging
 # ─────────────────────────────────────────────────────────────────────
@@ -269,9 +278,17 @@ def evaluate_fitness(
     wait_cost = config.wait_time_penalty_weight * avg_wait_penalty
 
     # ── 3. Grid-stress penalty ───────────────────────────────────────
-    grid_cost = config.grid_penalty_weight * get_grid_penalty_dummy(
-        chromosome, config.grid_capacity_per_node, rng
-    )
+    try:
+        from data_pipeline.evaluate_charger_placement import evaluate_charger_placement
+        # Chromosome contains the number of charging ports for each node.
+        # Evaluate penalty on peak load (assuming worst-case static loading for the configuration)
+        bus_ids = np.arange(n_nodes) + 2 # DistFlow generally uses buses 2-33
+        power_kw = chromosome.astype(np.float64) * 50.0  # 50 kW per port
+        grid_cost = config.grid_penalty_weight * evaluate_charger_placement(bus_ids, power_kw)
+    except ImportError:
+        grid_cost = config.grid_penalty_weight * get_grid_penalty_dummy(
+            chromosome, config.grid_capacity_per_node, rng
+        )
 
     # ── 4. OpEx + CVaR tail risk ─────────────────────────────────────
     #   Per-scenario OpEx: charge served = min(demand, port_capacity).
@@ -680,6 +697,16 @@ class ChargerOptimizerGA:
             print(f"   Generations  : {gen + 1}")
             print(f"   Converged    : {converged}")
 
+        import json
+        import os
+        
+        # Save output to output/final_optimal_layout.json
+        output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "output")
+        os.makedirs(output_dir, exist_ok=True)
+        final_layout = {"bus_ids": (np.arange(self.n_nodes) + 2).tolist(), "power_kw": (self.best_chromosome * 50.0).tolist()}
+        with open(os.path.join(output_dir, 'final_optimal_layout.json'), 'w') as f:
+            json.dump(final_layout, f)
+
         return {
             "best_chromosome": self.best_chromosome,
             "best_fitness": self.best_fitness,
@@ -710,13 +737,25 @@ def _demo() -> None:
         seed=42,
     )
 
-    # ── synthetic demand: log-normal with heavy tail ─────────────────
+    # ── demand: load Sujay's generated tensor if available ─────────────────
     rng = np.random.default_rng(config.seed)
-    demand_scenarios = rng.lognormal(
-        mean=3.0, sigma=0.8, size=(N_SCENARIOS, N_NODES)
-    )
-    # inject a few extreme "black-swan" scenarios
-    demand_scenarios[-10:] *= 3.0
+    tensor_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "extreme_demand_tensor.npy")
+    if os.path.exists(tensor_path):
+        print("Using extreme_demand_tensor from Sujay...")
+        demand_scenarios = np.load(tensor_path)
+        # Squeeze or format to [S, N] correctly
+        if demand_scenarios.ndim == 3: 
+            demand_scenarios = demand_scenarios.max(axis=1) # take max across the 24h
+        if demand_scenarios.shape[1] > N_NODES:
+            demand_scenarios = demand_scenarios[:, :N_NODES]
+        elif demand_scenarios.shape[1] < N_NODES:
+            demand_scenarios = np.pad(demand_scenarios, ((0, 0), (0, N_NODES - demand_scenarios.shape[1])))
+    else:
+        demand_scenarios = rng.lognormal(
+            mean=3.0, sigma=0.8, size=(N_SCENARIOS, N_NODES)
+        )
+        # inject a few extreme "black-swan" scenarios
+        demand_scenarios[-10:] *= 3.0
 
     print("=" * 64)
     print("  EVolvAI — ChargerOptimizerGA V1 Demo")

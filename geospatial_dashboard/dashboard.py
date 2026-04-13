@@ -45,33 +45,45 @@ with st.sidebar:
                "Node colors reflect transformer overload status under selected scenario conditions.")
 
 
-# ─── Fetch data from API ─────────────────────────────────────
-@st.cache_data(ttl=5)  # cache for 5 seconds
-def fetch_nodes(scenario_key):
-    try:
-        r = requests.get(f"{API_URL}/api/nodes/{scenario_key}", timeout=5)
-        return r.json()
-    except Exception as e:
-        st.error(f"Cannot connect to API. Is it running? Error: {e}")
-        return None
+# ─── Fetch data from Files ─────────────────────────────────────
+import os
+import json
+from gini import calculate_gini, get_accessibility_scores
 
-@st.cache_data(ttl=5)
-def fetch_gini(scenario_key):
-    try:
-        r = requests.get(f"{API_URL}/api/gini/{scenario_key}", timeout=5)
-        return r.json()
-    except:
-        return None
+# Load mock nodes for coordinates
+mock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mock_data.json")
+with open(mock_path, "r") as f:
+    RAW_DATA = json.load(f)
+nodes = RAW_DATA["nodes"]
 
+# Load optimal layout
+layout_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "output", "final_optimal_layout.json")
 
-data = fetch_nodes(scenario)
-gini_data = fetch_gini(scenario)
+try:
+    with open(layout_path, "r") as f:
+        optimal_data = json.load(f)
+    
+    # map optimal data to nodes
+    bus_ids = optimal_data["bus_ids"] # likely 2 to 33
+    power_kw_list = optimal_data["power_kw"]
+    
+    for node in nodes:
+        bus = node["node_id"]
+        if bus in bus_ids:
+            idx = bus_ids.index(bus)
+            ports = int(power_kw_list[idx] / 50.0)
+            node["charger_count"] = ports
+        else:
+            node["charger_count"] = 0
+            
+except FileNotFoundError:
+    st.warning("Optimizer output not found. Run the optimizer first. Falling back to mock data.")
 
-if data is None:
-    st.error("Start the API first: `uvicorn api:app --reload`")
-    st.stop()
+# Update Gini Score for each node
+scores = get_accessibility_scores(nodes)
+gini_index = calculate_gini(scores)
 
-nodes = data["nodes"]
+gini_data = {"gini_index": gini_index}
 
 # ─── Top Metrics Row ─────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)

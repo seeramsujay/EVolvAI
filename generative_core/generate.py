@@ -165,3 +165,44 @@ def generate_all_scenarios(model=None,
             print(f"    → {path}")
 
     return results
+
+def generate_extreme_demand_tensor(model=None, device=None, n=1000):
+    """
+    Generates an extreme demand tensor with 1000 scenarios and saves to data/ extreme_demand_tensor.npy
+    """
+    import os
+    if model is None:
+        try:
+            model, device = load_model(device)
+        except FileNotFoundError:
+            print("No model to load, using mock generator for demo...")
+            from .mock import generate_mock_demand
+            scenarios = []
+            for _ in range(n):
+                scenarios.append(generate_mock_demand(config.NUM_NODES, config.SEQ_LEN))
+            demand_tensor = np.stack(scenarios, axis=0)
+            
+            os.makedirs(os.path.join(config.PROJECT_ROOT, 'data'), exist_ok=True)
+            path = os.path.join(config.PROJECT_ROOT, 'data', 'extreme_demand_tensor.npy')
+            np.save(path, demand_tensor)
+            print(f"Saved {demand_tensor.shape} to {path}")
+            return demand_tensor
+    else:
+        device = _resolve_device(model, device)
+
+    condition = config.SCENARIOS["extreme_winter_storm"]["condition"]
+    scenarios = []
+    for _ in range(n):
+        tensor = generate_counterfactual(model, device, condition)
+        scenarios.append(tensor)
+    
+    demand_tensor = np.stack(scenarios, axis=0) # [1000, 24, NUM_NODES]
+    
+    os.makedirs(os.path.join(config.PROJECT_ROOT, 'data'), exist_ok=True)
+    path = os.path.join(config.PROJECT_ROOT, 'data', 'extreme_demand_tensor.npy')
+    np.save(path, demand_tensor)
+    print(f"Saved {demand_tensor.shape} to {path}")
+    return demand_tensor
+
+if __name__ == "__main__":
+    generate_extreme_demand_tensor()
