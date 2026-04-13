@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Physics Penalty Engine – IEEE 33-Bus Grid Analyser</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:      #0b0f1a;
+    --surface: #111827;
+    --surf2:   #1a2235;
+    --border:  rgba(96,165,250,0.15);
+    --accent:  #3b82f6;
+    --accent2: #06b6d4;
+    --warn:    #f59e0b;
+    --danger:  #ef4444;
+    --success: #22c55e;
+    --text:    #e2e8f0;
+    --muted:   #64748b;
+    --mono:    'IBM Plex Mono', monospace;
+    --sans:    'Space Grotesk', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+
+  .wrap { position: relative; z-index: 1; max-width: 1340px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  header { margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; }
+  .badge {
+    display: inline-block; font-family: var(--mono); font-size: 11px;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent2);
+    border: 1px solid rgba(6,182,212,0.3); border-radius: 3px;
+    padding: 2px 8px; margin-bottom: 0.6rem;
+  }
+  header h1 { font-size: clamp(1.4rem,3vw,2.2rem); font-weight: 600; letter-spacing:-0.02em; color:#f1f5f9; }
+  header h1 span { color: var(--accent); }
+  header p { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; max-width: 700px; line-height:1.6; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 0.9rem; margin-bottom: 1rem; }
+  @media(max-width:900px){ .grid-2,.grid-3,.grid-4{ grid-template-columns:1fr; } }
+  @media(min-width:901px) and (max-width:1100px){ .grid-4{grid-template-columns:1fr 1fr;} }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem; }
+  .card-title { font-size: 0.68rem; font-family: var(--mono); letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); margin-bottom: 0.7rem; }
+
+  .metric-tile { background: var(--surf2); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1.1rem; }
+  .metric-label { font-size: 0.68rem; font-family: var(--mono); letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); }
+  .metric-value { font-size: 1.7rem; font-weight: 600; letter-spacing:-0.03em; margin-top:3px; }
+  .metric-sub   { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+  .ok   { color: var(--success); }
+  .warn { color: var(--warn); }
+  .bad  { color: var(--danger); }
+
+  .scenario-row { display: grid; grid-template-columns: 2fr 2fr 1fr; gap: 0.5rem; margin-bottom: 0.45rem; align-items: center; }
+  label { font-size: 0.75rem; color: var(--muted); display: block; margin-bottom: 2px; }
+
+  input[type=number], select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 5px; color: var(--text); font-family: var(--mono);
+    font-size: 0.82rem; padding: 5px 9px; outline: none;
+  }
+  input[type=number]:focus, select:focus { border-color: var(--accent); }
+  input[type=range] {
+    -webkit-appearance: none; width: 100%; height: 4px;
+    background: var(--surf2); border-radius: 2px; outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+  }
+
+  button {
+    background: var(--accent); color: white; border: none; border-radius: 6px;
+    padding: 7px 16px; font-family: var(--sans); font-size: 0.82rem;
+    font-weight: 500; cursor: pointer; transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  button.sec { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  button.sec:hover { border-color: var(--accent); color: var(--accent); }
+  button.red { background: var(--danger); }
+
+  #net-svg { width: 100%; height: auto; display: block; }
+  .bus-node { cursor: pointer; }
+  .bus-node:hover circle { opacity: 0.75; }
+
+  .bar-wrap { display: flex; align-items: flex-end; gap: 2px; height: 110px; padding-bottom: 2px; overflow-x: auto; }
+  .bar-col  { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: 20px; }
+  .bar-bar  { width: 16px; border-radius: 3px 3px 0 0; transition: height 0.4s; min-height: 2px; }
+  .bar-lbl  { font-family: var(--mono); font-size: 8px; color: var(--muted); margin-top: 2px; }
+
+  .vwrap { overflow-x: auto; }
+
+  #console-log {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7rem 1rem; font-family: var(--mono); font-size: 0.73rem;
+    color: #94a3b8; max-height: 160px; overflow-y: auto; line-height: 1.7;
+  }
+  .log-ok   { color: var(--success); }
+  .log-warn { color: var(--warn); }
+  .log-bad  { color: var(--danger); }
+  .log-info { color: var(--accent2); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th { font-family: var(--mono); font-size: 0.67rem; text-transform: uppercase;
+       letter-spacing: 0.06em; color: var(--muted); padding: 5px 7px;
+       border-bottom: 1px solid var(--border); text-align: left; }
+  td { padding: 4px 7px; border-bottom: 1px solid rgba(96,165,250,0.06); }
+  tr:last-child td { border-bottom: none; }
+
+  .pill { display:inline-block; font-family:var(--mono); font-size:10px; padding:1px 7px; border-radius:10px; }
+  .pill-ok   { background:rgba(34,197,94,0.12);  color:var(--success); }
+  .pill-warn { background:rgba(245,158,11,0.12); color:var(--warn); }
+  .pill-bad  { background:rgba(239,68,68,0.12);  color:var(--danger); }
+
+  .solver-badge {
+    display:inline-flex; align-items:center; gap:6px;
+    font-family:var(--mono); font-size:10px; color:var(--accent2);
+    background:rgba(6,182,212,0.08); border:1px solid rgba(6,182,212,0.2);
+    border-radius:4px; padding:3px 10px; margin-bottom:0.75rem;
+  }
+  .solver-dot { width:6px; height:6px; border-radius:50%; background:var(--success); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- HEADER -->
+<header>
+  <div class="badge">IEEE 33-Bus Distribution Feeder</div>
+  <h1>Physics <span>Penalty</span> Engine</h1>
+  <p>
+    AC constraint checker for EV charging placement on the IEEE 33-bus radial distribution feeder.
+    Evaluates three physical constraints — nodal voltage bounds, branch thermal limits, and transformer kVA capacity —
+    using the same <strong>Simplified DistFlow Forward-Backward Sweep</strong> solver as the MATLAB engine.
+  </p>
+</header>
+
+<!-- METRIC TILES -->
+<div class="grid-4" id="metric-tiles">
+  <div class="metric-tile">
+    <div class="metric-label">Total Penalty Score</div>
+    <div class="metric-value" id="m-penalty">—</div>
+    <div class="metric-sub">0 = fully feasible</div>
+  </div>
+  <div class="metric-tile">
+    <div class="metric-label">Minimum Voltage</div>
+    <div class="metric-value" id="m-vmin">— pu</div>
+    <div class="metric-sub">Limit: 0.95 – 1.05 pu</div>
+  </div>
+  <div class="metric-tile">
+    <div class="metric-label">Transformer Load</div>
+    <div class="metric-value" id="m-xfmr">—%</div>
+    <div class="metric-sub">Rated: 5,000 kVA</div>
+  </div>
+  <div class="metric-tile">
+    <div class="metric-label">System Status</div>
+    <div class="metric-value" id="m-status">—</div>
+    <div class="metric-sub" id="m-sub">add chargers and run</div>
+  </div>
+</div>
+
+<!-- BUILDER + NETWORK -->
+<div class="grid-2">
+
+  <div class="card">
+    <div class="card-title">Scenario Builder</div>
+    <div class="solver-badge"><span class="solver-dot"></span>Simplified DistFlow FBS · Baran &amp; Wu 1989</div>
+    <div id="scenario-list"></div>
+    <div style="display:flex;gap:7px;margin-top:0.7rem;flex-wrap:wrap;">
+      <button onclick="addCharger()">+ Add Charger</button>
+      <button class="sec" onclick="loadPreset('light')">Preset: Light</button>
+      <button class="sec" onclick="loadPreset('stress')">Preset: Stress Test</button>
+      <button class="red" onclick="clearAll()">Clear</button>
+    </div>
+
+    <div style="margin-top:0.9rem;border-top:1px solid var(--border);padding-top:0.9rem;">
+      <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.5rem;">Constraint Options</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin-bottom:0.7rem;">
+        <div><label>V min (pu)</label><input type="number" id="o-vmin" value="0.95" step="0.01" min="0.90" max="0.99"></div>
+        <div><label>V max (pu)</label><input type="number" id="o-vmax" value="1.05" step="0.01" min="1.01" max="1.10"></div>
+        <div><label>Xfmr rating (kVA)</label><input type="number" id="o-xkva" value="5000" step="100" min="500"></div>
+        <div><label>Thermal limit (pu)</label><input type="number" id="o-ilim" value="1.00" step="0.05" min="0.5" max="2.0"></div>
+      </div>
+      <button onclick="runAnalysis()" style="width:100%;padding:9px;font-size:0.88rem;">
+        ▶  Run AC Power Flow Analysis
+      </button>
+    </div>
+  </div>
+
+  <!-- Network Map -->
+  <div class="card">
+    <div class="card-title">
+      IEEE 33-Bus Feeder Topology
+      <span style="color:var(--accent);font-size:9px;margin-left:6px;">click a bus to add/remove charger</span>
+    </div>
+    <svg id="net-svg" viewBox="0 0 560 350" xmlns="http://www.w3.org/2000/svg"></svg>
+    <!-- Legend -->
+    <div style="display:flex;gap:14px;margin-top:6px;font-size:10px;font-family:var(--mono);color:var(--muted);">
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6d28d9;margin-right:3px;"></span>Substation</span>
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:3px;"></span>Charger placed</span>
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:3px;"></span>Voltage OK</span>
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:3px;"></span>Violation</span>
+    </div>
+  </div>
+</div>
+
+<!-- CHARTS ROW -->
+<div class="grid-3" style="margin-bottom:1rem;">
+
+  <!-- Penalty donut -->
+  <div class="card">
+    <div class="card-title">Penalty Breakdown</div>
+    <div style="display:flex;justify-content:center;margin:0.3rem 0;">
+      <svg id="donut" width="170" height="170" viewBox="0 0 170 170">
+        <circle cx="85" cy="85" r="60" fill="none" stroke="#1a2235" stroke-width="20"/>
+        <circle id="d-v" cx="85" cy="85" r="60" fill="none" stroke="#3b82f6" stroke-width="20"
+                stroke-dasharray="0 377" stroke-linecap="round" transform="rotate(-90 85 85)"/>
+        <circle id="d-t" cx="85" cy="85" r="60" fill="none" stroke="#f59e0b" stroke-width="20"
+                stroke-dasharray="0 377" stroke-linecap="round" transform="rotate(-90 85 85)"/>
+        <circle id="d-x" cx="85" cy="85" r="60" fill="none" stroke="#ef4444" stroke-width="20"
+                stroke-dasharray="0 377" stroke-linecap="round" transform="rotate(-90 85 85)"/>
+        <text x="85" y="81" text-anchor="middle" fill="#e2e8f0" font-size="20" font-weight="600"
+              font-family="'Space Grotesk',sans-serif" id="d-total">0</text>
+        <text x="85" y="97" text-anchor="middle" fill="#64748b" font-size="9"
+              font-family="'Space Grotesk',sans-serif">total penalty</text>
+      </svg>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;text-align:center;">
+      <div>
+        <div class="metric-label">Voltage</div>
+        <div style="font-size:0.95rem;font-weight:600;color:#3b82f6;" id="pen-v">—</div>
+        <div style="font-size:9px;color:var(--muted);">w=1000</div>
+      </div>
+      <div>
+        <div class="metric-label">Thermal</div>
+        <div style="font-size:0.95rem;font-weight:600;color:#f59e0b;" id="pen-t">—</div>
+        <div style="font-size:9px;color:var(--muted);">w=500</div>
+      </div>
+      <div>
+        <div class="metric-label">Transformer</div>
+        <div style="font-size:0.95rem;font-weight:600;color:#ef4444;" id="pen-x">—</div>
+        <div style="font-size:9px;color:var(--muted);">w=800</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voltage profile -->
+  <div class="card" style="grid-column: span 2;">
+    <div class="card-title">Nodal Voltage Profile — all 33 buses</div>
+    <div class="vwrap">
+      <svg id="vsvg" viewBox="0 0 580 155" style="min-width:480px;width:100%;height:auto;">
+        <defs>
+          <linearGradient id="vg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.35"/>
+            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- Limit lines -->
+        <line x1="22" y1="12"  x2="560" y2="12"  stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>
+        <line x1="22" y1="138" x2="560" y2="138" stroke="#ef4444" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>
+        <text x="563" y="15"  fill="#f59e0b" font-size="7.5" font-family="IBM Plex Mono,monospace">1.05</text>
+        <text x="563" y="141" fill="#ef4444" font-size="7.5" font-family="IBM Plex Mono,monospace">0.95</text>
+        <!-- Slack label -->
+        <text x="22" y="150" fill="#64748b" font-size="7" font-family="IBM Plex Mono,monospace">Bus 1</text>
+        <text x="535" y="150" fill="#64748b" font-size="7" font-family="IBM Plex Mono,monospace">Bus 33</text>
+        <polyline id="v-area" points="" fill="url(#vg)" stroke="none"/>
+        <polyline id="v-line" points="" fill="none" stroke="#3b82f6" stroke-width="1.6" stroke-linejoin="round"/>
+        <g id="v-dots"></g>
+      </svg>
+    </div>
+    <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">
+      Voltage drops away from the substation (Bus 1). Red dots = under-voltage violation. Amber = over-voltage.
+    </div>
+  </div>
+</div>
+
+<!-- BRANCH LOADING + VIOLATIONS -->
+<div class="grid-2" style="margin-bottom:1rem;">
+
+  <div class="card">
+    <div class="card-title">Branch Loading (%) — all 32 cables</div>
+    <div class="bar-wrap" id="branch-bars"></div>
+    <div style="font-size:0.7rem;color:var(--muted);margin-top:5px;">
+      Cables near the substation carry the heaviest load. Red bars exceed the thermal limit.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Constraint Detail</div>
+    <table>
+      <thead><tr><th>Type</th><th>Element</th><th>Value</th><th>Limit</th><th>Status</th></tr></thead>
+      <tbody id="vtable">
+        <tr><td colspan="5" style="color:var(--muted);text-align:center;padding:0.9rem;">
+          Run analysis to see results
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- BUS SWEEP HEATMAP -->
+<div class="card" style="margin-bottom:1rem;">
+  <div class="card-title">
+    Penalty Heatmap — single 150 kW charger at each bus
+    <span style="color:var(--muted);font-size:9px;margin-left:6px;">computed with current constraint settings</span>
+  </div>
+  <div style="overflow-x:auto;padding-top:6px;">
+    <svg id="hmap" viewBox="0 0 1060 72" style="min-width:760px;width:100%;height:auto;"></svg>
+  </div>
+  <div style="display:flex;gap:16px;margin-top:7px;font-size:10px;font-family:var(--mono);color:var(--muted);">
+    <span style="display:flex;align-items:center;gap:4px;">
+      <span style="width:11px;height:11px;border-radius:2px;background:#22c55e;display:inline-block;"></span>Feasible (0 penalty)
+    </span>
+    <span style="display:flex;align-items:center;gap:4px;">
+      <span style="width:11px;height:11px;border-radius:2px;background:#f59e0b;display:inline-block;"></span>Moderate violation
+    </span>
+    <span style="display:flex;align-items:center;gap:4px;">
+      <span style="width:11px;height:11px;border-radius:2px;background:#ef4444;display:inline-block;"></span>Severe violation
+    </span>
+    <span style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+      <span style="color:var(--accent2);">Best bus shown with ★</span>
+    </span>
+  </div>
+</div>
+
+<!-- LOG -->
+<div class="card">
+  <div class="card-title">Analysis Log</div>
+  <div id="console-log">
+    <span class="log-info">» Physics Penalty Engine ready — Simplified DistFlow FBS solver (matches MATLAB engine exactly).</span>
+  </div>
+</div>
+
+</div><!-- .wrap -->
+
+<script>
+// ==========================================================================
+//  SIMPLIFIED DISTFLOW FORWARD-BACKWARD SWEEP
+//  Exact JavaScript port of physics_penalty_engine.m
+//  Reference: Baran & Wu, IEEE Trans. Power Del., 1989
+// ==========================================================================
+
+// ---- Network data (IEEE 33-bus) ------------------------------------------
+// branch_data[k] = [from_bus, to_bus, R_pu, X_pu]  (1-indexed bus numbers)
+const BD = [
+  [1,2,  0.0575,0.0293], [2,3,  0.3075,0.1563], [3,4,  0.2279,0.1161],
+  [4,5,  0.2379,0.1209], [5,6,  0.5110,0.4411], [6,7,  0.1167,0.3861],
+  [7,8,  1.0640,0.7707], [8,9,  1.0640,0.7707], [9,10, 0.9977,0.4400],
+  [10,11,0.1967,0.0651], [11,12,0.3744,0.1238], [12,13,1.4680,1.1549],
+  [13,14,0.5416,0.7129], [14,15,0.5910,0.5260], [15,16,0.7463,0.5450],
+  [16,17,1.2890,1.7210], [17,18,0.7320,0.5739], [2,19, 0.1640,0.1565],
+  [19,20,1.5042,1.3554], [20,21,0.4095,0.4784], [21,22,0.7089,0.9373],
+  [3,23, 0.4512,0.3083], [23,24,0.8980,0.7091], [24,25,0.8960,0.7011],
+  [6,26, 0.2030,0.1034], [26,27,0.2842,0.1447], [27,28,1.0590,0.9337],
+  [28,29,0.8042,0.7006], [29,30,0.5075,0.2585], [30,31,0.9744,0.9630],
+  [31,32,0.3105,0.3619], [32,33,0.3410,0.5302],
+];
+
+// Base loads per bus [MW, MVAr] — index 0 = bus 1 (slack, zero load)
+const BASE_P = [0,0.100,0.090,0.120,0.060,0.060,0.200,0.200,0.060,0.060,
+                0.045,0.060,0.060,0.120,0.060,0.060,0.060,0.090,0.090,0.090,
+                0.090,0.090,0.090,0.420,0.420,0.060,0.060,0.060,0.120,0.200,
+                0.150,0.210,0.060];
+const BASE_Q = [0,0.060,0.040,0.080,0.030,0.035,0.1025,0.100,0.020,0.020,
+                0.030,0.035,0.035,0.080,0.010,0.020,0.020,0.040,0.040,0.040,
+                0.040,0.040,0.050,0.200,0.200,0.025,0.025,0.020,0.070,0.600,
+                0.070,0.100,0.040];
+
+const N_BUS    = 33;
+const N_BRANCH = 32;
+const BASE_MVA = 10;
+const XFMR_KVA = 5000;
+
+// Precompute tree structure once
+const CHILDREN   = Array.from({length:N_BUS+1}, ()=>[]);   // 1-indexed
+const PAR_BRANCH = new Array(N_BUS+1).fill(-1);             // 1-indexed
+BD.forEach(([f,t], k) => { CHILDREN[f].push(t); PAR_BRANCH[t] = k; });
+
+// BFS order (1-indexed bus numbers)
+const BFS = []; { const q=[1]; const vis=new Set([1]);
+  while(q.length){const n=q.shift();BFS.push(n);
+    for(const c of CHILDREN[n]){if(!vis.has(c)){vis.add(c);q.push(c);}}} }
+const REV_BFS = [...BFS].reverse();
+
+// ==========================================================================
+//  CORE SOLVER — simplified DistFlow FBS
+// ==========================================================================
+function runPowerFlow(evList, opts = {}) {
+  const vMin = opts.vMin ?? 0.95;
+  const vMax = opts.vMax ?? 1.05;
+  const iLim = opts.iLim ?? 1.00;
+  const xKVA = opts.xKVA ?? 5000;
+  const wV   = 1000, wT = 500, wX = 800;
+
+  // ---- Inject EV loads
+  const P = [...BASE_P];   // MW,   index 0 = bus 1
+  const Q = [...BASE_Q];   // MVAr
+  for (const ev of evList) {
+    const i = ev.bus - 1;
+    const p = ev.p_kw / 1000;
+    const q = ev.q_kvar != null ? ev.q_kvar / 1000 : p * Math.tan(Math.acos(0.90));
+    P[i] += p;
+    Q[i] += q;
+  }
+
+  // ---- Initialise
+  const V   = new Array(N_BUS+1).fill(1.0);   // voltage [pu], 1-indexed
+  const Pbr = new Float64Array(N_BRANCH);       // branch active power [MW]
+  const Qbr = new Float64Array(N_BRANCH);       // branch reactive power [MVAr]
+
+  const MAX_ITER = 100;
+  const TOL      = 1e-8;
+  let converged  = false;
+
+  for (let iter = 0; iter < MAX_ITER; iter++) {
+    const V_old = [...V];
+
+    // -- Backward sweep: accumulate load power flows (no loss term) ------
+    // Pure simplified DistFlow: branch flow = sum of downstream loads only.
+    // Omitting the I²R/I²X loss terms here (as in the MATLAB engine) keeps
+    // Pbr/Qbr bounded regardless of voltage level — the key to stability.
+    for (const n of REV_BFS) {
+      if (n === 1) continue;
+      const k = PAR_BRANCH[n];
+
+      let ps = P[n-1], qs = Q[n-1];
+      for (const c of CHILDREN[n]) {
+        const kc = PAR_BRANCH[c];
+        ps += Pbr[kc];  qs += Qbr[kc];
+      }
+      Pbr[k] = ps;
+      Qbr[k] = qs;
+    }
+
+    // -- Forward sweep: update voltages (simplified DistFlow) ------------
+    // V_t = V_f - (R*P + X*Q) / V_f
+    // With Pbr/Qbr bounded, dV is always a small fraction of Vf — stable.
+    V[1] = 1.0;
+    for (const n of BFS) {
+      if (n === 1) continue;
+      const k  = PAR_BRANCH[n];
+      const f  = BD[k][0];
+      const Vf = V[f];   // no floor needed — Vf stays near 1.0
+      const dV = (BD[k][2] * Pbr[k] + BD[k][3] * Qbr[k]) / Vf;
+      V[n] = Math.max(Vf - dV, 0.50);   // physical floor at 0.5 pu
+    }
+
+    // -- Convergence check
+    let maxDV = 0;
+    for (let i = 1; i <= N_BUS; i++) maxDV = Math.max(maxDV, Math.abs(V[i] - V_old[i]));
+    if (maxDV < TOL) { converged = true; break; }
+  }
+
+  // ---- Branch currents [pu]
+  const I_pu = new Float64Array(N_BRANCH);
+  for (let k = 0; k < N_BRANCH; k++) {
+    const S_mva = Math.sqrt(Pbr[k]**2 + Qbr[k]**2);
+    const Vf    = Math.max(V[BD[k][0]], 0.50);   // 0.5 pu floor — matches solver floor
+    I_pu[k] = S_mva / (Vf * BASE_MVA);
+  }
+
+  // ---- Transformer (branch 0 = feeder head, bus 1→2)
+  const S_xfmr_kva      = Math.sqrt(Pbr[0]**2 + Qbr[0]**2) * 1000;
+  const xfmr_loading_pct = (S_xfmr_kva / xKVA) * 100;
+
+  // ---- Losses (approximate: R * I² per branch)
+  let P_loss_kw = 0;
+  for (let k = 0; k < N_BRANCH; k++) {
+    const Vf2 = Math.max(V[BD[k][0]]**2, 0.25);   // 0.5² floor
+    P_loss_kw += BD[k][2] * (Pbr[k]**2 + Qbr[k]**2) / Vf2;
+  }
+  P_loss_kw *= 1000;
+
+  // ---- Penalty scores
+  let pV = 0, pT = 0;
+  const vViols = [], iViols = [];
+
+  for (let i = 1; i <= N_BUS; i++) {
+    const v     = V[i];
+    const under = Math.max(0, vMin - v);
+    const over  = Math.max(0, v - vMax);
+    pV += wV * (under**2 + over**2);
+    if (under > 0) vViols.push({bus:i, v, type:'under', limit:vMin});
+    else if (over > 0) vViols.push({bus:i, v, type:'over',  limit:vMax});
+  }
+
+  for (let k = 0; k < N_BRANCH; k++) {
+    const ex = Math.max(0, I_pu[k]/iLim - 1);
+    pT += wT * ex**2;
+    if (ex > 0) iViols.push({branch:k+1, from:BD[k][0], to:BD[k][1], loading:I_pu[k]*100});
+  }
+
+  const xEx = Math.max(0, S_xfmr_kva/xKVA - 1);
+  const pX  = wX * xEx**2;
+
+  return {
+    V, I_pu, Pbr, Qbr,
+    S_xfmr_kva, xfmr_loading_pct,
+    P_loss_kw,
+    penalty: pV + pT + pX, pV, pT, pX,
+    feasible: (pV + pT + pX) < 1e-10,
+    vViols, iViols, converged,
+  };
+}
+
+// ==========================================================================
+//  BUS POSITIONS (for network map)
+// ==========================================================================
+const BUS_POS = {
+  1:{x:28,y:175},  2:{x:72,y:175},  3:{x:116,y:175}, 4:{x:160,y:175},
+  5:{x:204,y:175}, 6:{x:248,y:175}, 7:{x:294,y:175}, 8:{x:338,y:175},
+  9:{x:382,y:175}, 10:{x:426,y:175},11:{x:470,y:175},12:{x:514,y:175},
+  13:{x:536,y:175},14:{x:536,y:215},15:{x:536,y:252},16:{x:536,y:286},
+  17:{x:536,y:320},18:{x:496,y:320},
+  19:{x:72,y:215}, 20:{x:72,y:252}, 21:{x:72,y:286}, 22:{x:72,y:320},
+  23:{x:116,y:215},24:{x:116,y:252},25:{x:116,y:286},
+  26:{x:248,y:215},27:{x:248,y:252},28:{x:248,y:286},
+  29:{x:248,y:320},30:{x:208,y:320},31:{x:168,y:320},
+  32:{x:128,y:320},33:{x:88,y:320}
+};
+
+// ==========================================================================
+//  UI STATE
+// ==========================================================================
+let scenario   = [];
+let lastResult = null;
+
+function addCharger(bus=6, p=150) {
+  scenario.push({bus, p_kw:p, q_kvar:null});
+  renderScenario();
+}
+function removeCharger(i) { scenario.splice(i,1); renderScenario(); }
+function clearAll()        { scenario=[]; renderScenario(); resetUI(); log('Scenario cleared.','info'); }
+
+function loadPreset(name) {
+  scenario = name==='light'
+    ? [{bus:7,p_kw:50},{bus:15,p_kw:50}]
+    : [{bus:18,p_kw:150},{bus:25,p_kw:150},{bus:33,p_kw:150}];
+  lastResult = null;   // clear stale results before re-rendering
+  renderScenario();
+  resetUI();
+  log(`Preset '${name}' loaded (${scenario.length} charger${scenario.length>1?'s':''}). Click Run to analyse.`,'info');
+}
+
+function renderScenario() {
+  const el2 = document.getElementById('scenario-list');
+  if (!scenario.length) {
+    el2.innerHTML = '<div style="color:var(--muted);font-size:0.78rem;margin-bottom:0.4rem;">No chargers. Click a bus on the map or use the button below.</div>';
+    drawNetwork(null);
+    return;
+  }
+  el2.innerHTML = scenario.map((s,i)=>`
+    <div class="scenario-row">
+      <div>
+        <label>Bus</label>
+        <select onchange="scenario[${i}].bus=+this.value">
+          ${Array.from({length:32},(_,j)=>j+2).map(b=>`<option value="${b}"${b===s.bus?' selected':''}>${b}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label>Power (kW)</label>
+        <input type="number" value="${s.p_kw}" min="1" max="1000" step="10"
+               onchange="scenario[${i}].p_kw=+this.value">
+      </div>
+      <div style="display:flex;align-items:flex-end;padding-bottom:1px;">
+        <button class="red" onclick="removeCharger(${i})" style="padding:5px 10px;">✕</button>
+      </div>
+    </div>`).join('');
+  drawNetwork(lastResult);   // lastResult may be null — drawNetwork handles it
+}
+
+// ==========================================================================
+//  NETWORK MAP
+// ==========================================================================
+function drawNetwork(res) {
+  const svg    = document.getElementById('net-svg');
+  const cBuses = new Set(scenario.map(s=>s.bus));
+  const vMap   = res ? res.V : {};
+
+  let h = '';
+  // Branches
+  for (const [f,t] of BD) {
+    const a=BUS_POS[f], b=BUS_POS[t];
+    h += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"
+                stroke="#1e3a5f" stroke-width="1.5"/>`;
+  }
+  // Buses
+  for (let bus=1; bus<=33; bus++) {
+    const {x,y} = BUS_POS[bus];
+    const isSlack   = bus===1;
+    const isCharger = cBuses.has(bus);
+    const v         = res ? res.V[bus] : null;
+    const vMin      = +document.getElementById('o-vmin').value;
+    const vMax      = +document.getElementById('o-vmax').value;
+
+    let fill = '#1e40af';
+    if (isSlack)                           fill = '#6d28d9';
+    else if (isCharger)                    fill = '#f59e0b';
+    else if (v !== null && v < vMin)       fill = '#dc2626';
+    else if (v !== null && v > vMax)       fill = '#ea580c';
+    else if (v !== null)                   fill = '#16a34a';
+
+    const r = isSlack ? 8 : (isCharger ? 7 : 5);
+    const title = isSlack ? 'Substation (slack bus)'
+                : (isCharger ? `Bus ${bus} — charger placed (${scenario.find(s=>s.bus===bus)?.p_kw} kW)`
+                : `Bus ${bus}${v?` — V=${v.toFixed(4)} pu`:''}` );
+
+    h += `<g class="bus-node" onclick="handleBusClick(${bus})">
+      <title>${title}</title>
+      <circle cx="${x}" cy="${y}" r="${r+5}" fill="transparent"/>
+      <circle cx="${x}" cy="${y}" r="${r}" fill="${fill}"
+              stroke="${isCharger?'#fbbf24':'#0f172a'}" stroke-width="${isCharger?2:1}"/>
+      <text x="${x}" y="${y-10}" text-anchor="middle" font-size="7"
+            fill="#475569" font-family="IBM Plex Mono,monospace">${bus}</text>
+      ${isCharger?`<text x="${x}" y="${y+16}" text-anchor="middle" font-size="8" fill="#fbbf24" font-family="IBM Plex Mono,monospace">⚡</text>`:''}
+    </g>`;
+  }
+  svg.innerHTML = h;
+}
+
+function handleBusClick(bus) {
+  if (bus===1) { log('Bus 1 is the substation (slack) — chargers cannot be placed here.','warn'); return; }
+  const idx = scenario.findIndex(s=>s.bus===bus);
+  if (idx>=0) { removeCharger(idx); log(`Removed charger from Bus ${bus}.`,'info'); }
+  else         { addCharger(bus,150); log(`Added 150 kW charger at Bus ${bus}.`,'info'); }
+}
+
+// ==========================================================================
+//  ANALYSIS
+// ==========================================================================
+function getOpts() {
+  const vMin = parseFloat(document.getElementById('o-vmin').value);
+  const vMax = parseFloat(document.getElementById('o-vmax').value);
+  const iLim = parseFloat(document.getElementById('o-ilim').value);
+  const xKVA = parseFloat(document.getElementById('o-xkva').value);
+  return {
+    vMin: isNaN(vMin) ? 0.95 : vMin,
+    vMax: isNaN(vMax) ? 1.05 : vMax,
+    iLim: isNaN(iLim) ? 1.00 : iLim,
+    xKVA: isNaN(xKVA) ? 5000 : xKVA,
+  };
+}
+
+function runAnalysis() {
+  if (!scenario.length) { log('Add at least one charger before running.','warn'); return; }
+
+  const opts = getOpts();
+  log('Running Simplified DistFlow FBS power flow...','info');
+
+  const res  = runPowerFlow(scenario, opts);
+  lastResult = res;
+
+  // ---- Metric tiles
+  const pen = isFinite(res.penalty) ? res.penalty : 0;
+  const penLabel = isFinite(res.penalty) ? pen.toFixed(2) : '—';
+  el('m-penalty').textContent = penLabel;
+  el('m-penalty').className   = `metric-value ${pen===0?'ok':pen<500?'warn':'bad'}`;
+
+  const vArr  = res.V.slice(1).filter(v => isFinite(v));
+  const vmin  = vArr.length ? Math.min(...vArr) : 0;
+  el('m-vmin').textContent = vmin.toFixed(4)+' pu';
+  el('m-vmin').className   = `metric-value ${vmin>=opts.vMin?'ok':'bad'}`;
+
+  const xpct = isFinite(res.xfmr_loading_pct) ? res.xfmr_loading_pct : 0;
+  el('m-xfmr').textContent = xpct.toFixed(1)+'%';
+  el('m-xfmr').className   = `metric-value ${xpct<=100?'ok':xpct<=120?'warn':'bad'}`;
+
+  el('m-status').textContent = res.feasible ? 'PASS' : 'FAIL';
+  el('m-status').className   = `metric-value ${res.feasible?'ok':'bad'}`;
+  el('m-sub').textContent    = res.feasible
+    ? 'all constraints satisfied'
+    : `${res.vViols.length} voltage + ${res.iViols.length} thermal violation(s)`;
+
+  // ---- Donut
+  updateDonut(res.pV, res.pT, res.pX);
+  el('pen-v').textContent = res.pV.toFixed(1);
+  el('pen-t').textContent = res.pT.toFixed(1);
+  el('pen-x').textContent = res.pX.toFixed(1);
+
+  // ---- Charts
+  updateVprofile(res.V, opts);
+  updateBranchBars(res.I_pu, opts.iLim);
+  updateViolationTable(res, opts);
+  drawNetwork(res);
+  runHeatmap(opts);
+
+  // ---- Log
+  const conv = res.converged ? 'converged' : 'did NOT converge';
+  log(`FBS ${conv} | Penalty: ${penLabel} | V_min: ${vmin.toFixed(4)} pu | Xfmr: ${xpct.toFixed(1)}% | Loss: ${isFinite(res.P_loss_kw)?res.P_loss_kw.toFixed(1):'—'} kW`,
+      pen===0 ? 'ok' : 'bad');
+}
+
+// ==========================================================================
+//  CHART HELPERS
+// ==========================================================================
+function updateDonut(pV, pT, pX) {
+  const total = pV + pT + pX;
+  const circ  = 2 * Math.PI * 60;   // 377 px
+  el('d-total').textContent = total.toFixed(0);
+  if (total === 0) {
+    ['d-v','d-t','d-x'].forEach(id => el(id).setAttribute('stroke-dasharray','0 377'));
+    return;
+  }
+  const fV = (pV/total)*circ, fT = (pT/total)*circ, fX = (pX/total)*circ;
+  el('d-v').setAttribute('stroke-dasharray',`${fV} ${circ}`);
+  el('d-v').setAttribute('transform','rotate(-90 85 85)');
+  el('d-t').setAttribute('stroke-dasharray',`${fT} ${circ}`);
+  el('d-t').setAttribute('transform',`rotate(${-90+(fV/circ)*360} 85 85)`);
+  el('d-x').setAttribute('stroke-dasharray',`${fX} ${circ}`);
+  el('d-x').setAttribute('transform',`rotate(${-90+((fV+fT)/circ)*360} 85 85)`);
+}
+
+function updateVprofile(V, opts) {
+  const W=538, H=130, padL=22, padR=22, padT=12, padB=12;
+  // Map voltage to y: 0.88 pu → bottom, 1.10 pu → top
+  const vLo=0.87, vHi=1.08;
+  const yOf = v => padT + (1-(v-vLo)/(vHi-vLo)) * (H-padT-padB);
+  const xOf = i => padL + (i/32) * (W-padL-padR);
+
+  let pts='', apts='';
+  for (let i=0;i<33;i++) {
+    const x=xOf(i), y=Math.max(padT,Math.min(H-padB, yOf(V[i+1])));
+    pts  += `${x},${y} `;
+    apts += `${x},${y} `;
+  }
+  apts += `${xOf(32)},${H-padB} ${xOf(0)},${H-padB}`;
+  el('v-area').setAttribute('points',apts);
+  el('v-line').setAttribute('points',pts);
+
+  // Dots coloured by violation
+  el('v-dots').innerHTML = Array.from({length:33},(_,i)=>{
+    const x=xOf(i), v=V[i+1];
+    const y=Math.max(padT,Math.min(H-padB,yOf(v)));
+    const col = v<opts.vMin?'#ef4444': v>opts.vMax?'#f59e0b':'#3b82f6';
+    const r   = (v<opts.vMin||v>opts.vMax) ? 4 : 2.5;
+    return `<circle cx="${x}" cy="${y}" r="${r}" fill="${col}"/>`;
+  }).join('');
+}
+
+function updateBranchBars(I_pu, iLim) {
+  const maxI = Math.max(...I_pu, iLim);
+  el('branch-bars').innerHTML = Array.from(I_pu).map((ii,k)=>{
+    const pct = ii/maxI;
+    const h   = Math.round(pct*100);
+    const col = ii>iLim ? '#ef4444' : ii>0.8*iLim ? '#f59e0b' : '#3b82f6';
+    return `<div class="bar-col">
+      <div class="bar-bar" style="height:${h}px;background:${col};"></div>
+      <div class="bar-lbl">${k+1}</div>
+    </div>`;
+  }).join('');
+}
+
+function updateViolationTable(res, opts) {
+  const rows = [];
+
+  res.vViols.forEach(v=>{
+    rows.push(`<tr>
+      <td>Voltage</td><td>Bus ${v.bus}</td>
+      <td style="font-family:var(--mono)">${v.v.toFixed(4)} pu</td>
+      <td style="font-family:var(--mono)">${v.limit} pu</td>
+      <td><span class="pill pill-bad">${v.type==='under'?'UNDER-V':'OVER-V'}</span></td>
+    </tr>`);
+  });
+
+  res.iViols.forEach(b=>{
+    rows.push(`<tr>
+      <td>Thermal</td><td>Branch ${b.branch} (${b.from}→${b.to})</td>
+      <td style="font-family:var(--mono)">${b.loading.toFixed(1)}%</td>
+      <td style="font-family:var(--mono)">100%</td>
+      <td><span class="pill pill-bad">OVERLOAD</span></td>
+    </tr>`);
+  });
+
+  const xPill = res.xfmr_loading_pct>100
+    ? '<span class="pill pill-bad">OVERLOADED</span>'
+    : res.xfmr_loading_pct>80
+      ? '<span class="pill pill-warn">HIGH</span>'
+      : '<span class="pill pill-ok">OK</span>';
+  rows.push(`<tr>
+    <td>Transformer</td><td>Substation</td>
+    <td style="font-family:var(--mono)">${res.xfmr_loading_pct.toFixed(1)}%</td>
+    <td style="font-family:var(--mono)">100% (${opts.xKVA} kVA)</td>
+    <td>${xPill}</td>
+  </tr>`);
+
+  el('vtable').innerHTML = rows.length===1 && res.xfmr_loading_pct<=100
+    ? `<tr><td colspan="5" style="color:var(--success);text-align:center;padding:0.75rem;">All constraints satisfied ✓</td></tr>`
+    : rows.join('');
+}
+
+// ==========================================================================
+//  BUS SWEEP HEATMAP
+// ==========================================================================
+function runHeatmap(opts) {
+  // Use safe defaults if opts missing or contains NaN
+  const safeOpts = {
+    vMin: (opts && !isNaN(opts.vMin)) ? opts.vMin : 0.95,
+    vMax: (opts && !isNaN(opts.vMax)) ? opts.vMax : 1.05,
+    iLim: (opts && !isNaN(opts.iLim)) ? opts.iLim : 1.00,
+    xKVA: (opts && !isNaN(opts.xKVA)) ? opts.xKVA : 5000,
+  };
+
+  const results = [];
+  for (let b=2; b<=33; b++) {
+    const r = runPowerFlow([{bus:b, p_kw:150}], safeOpts);
+    const score = isFinite(r.penalty) ? r.penalty : 1e6;
+    results.push({bus:b, score, feasible:r.feasible && isFinite(r.penalty)});
+  }
+
+  const maxScore = Math.max(...results.map(r=>r.score), 1);
+  const bestIdx  = results.reduce((best,r,i)=>r.score<results[best].score?i:best, 0);
+
+  const W=32, GAP=1, PAD=4;
+  el('hmap').innerHTML = results.map((r,i)=>{
+    const x = PAD + i*(W+GAP);
+    const t = Math.min(r.score/maxScore, 1);
+    let col;
+    if (r.score===0)   col='#16a34a';
+    else if (t<0.25)   col='#65a30d';
+    else if (t<0.50)   col='#ca8a04';
+    else if (t<0.75)   col='#ea580c';
+    else               col='#dc2626';
+    const op = (0.35 + 0.65*t).toFixed(2);
+    const isBest = i===bestIdx;
+    const label = r.score===0 ? '0' : r.score>9999 ? 'HIGH' : r.score.toFixed(0);
+    return `<g>
+      <rect x="${x}" y="4" width="${W}" height="42" rx="3" fill="${col}" opacity="${op}"/>
+      <text x="${x+W/2}" y="21" text-anchor="middle" font-size="8.5"
+            fill="white" font-family="IBM Plex Mono,monospace" font-weight="500">${r.bus}</text>
+      <text x="${x+W/2}" y="36" text-anchor="middle" font-size="7"
+            fill="rgba(255,255,255,0.7)" font-family="IBM Plex Mono,monospace">${label}</text>
+      ${isBest?`<text x="${x+W/2}" y="58" text-anchor="middle" font-size="11"
+        fill="#fbbf24" font-family="IBM Plex Mono,monospace">★</text>`:''}
+      <title>Bus ${r.bus}: penalty = ${r.score.toFixed(2)}</title>
+    </g>`;
+  }).join('');
+}
+
+// ==========================================================================
+//  LOG + HELPERS
+// ==========================================================================
+function log(msg, type='') {
+  const el2 = document.getElementById('console-log');
+  const cls  = {ok:'log-ok',warn:'log-warn',bad:'log-bad',info:'log-info'}[type]||'';
+  const pre  = {ok:'✓',warn:'⚠',bad:'✕',info:'»'}[type]||'»';
+  const ts   = new Date().toLocaleTimeString('en',{hour12:false});
+  el2.innerHTML += `\n<span class="${cls}">[${ts}] ${pre} ${msg}</span>`;
+  el2.scrollTop  = el2.scrollHeight;
+}
+
+function el(id) { return document.getElementById(id); }
+
+function resetUI() {
+  ['m-penalty','m-vmin','m-xfmr','m-status'].forEach(id=>{
+    el(id).textContent='—'; el(id).className='metric-value';
+  });
+  el('m-sub').textContent='add chargers and run';
+  el('v-line').setAttribute('points','');
+  el('v-area').setAttribute('points','');
+  el('v-dots').innerHTML='';
+  el('branch-bars').innerHTML='';
+  el('vtable').innerHTML='<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:0.9rem;">Run analysis to see results</td></tr>';
+  lastResult=null;
+}
+
+// ==========================================================================
+//  INIT — guarantee clean state, never auto-run the solver
+// ==========================================================================
+scenario = [{bus:18,p_kw:150},{bus:25,p_kw:150},{bus:33,p_kw:150}];
+resetUI();           // clear all metric tiles to '—' before anything renders
+renderScenario();    // draw the scenario builder rows
+drawNetwork(null);   // draw the topology map with no voltage colours yet
+
+// Run the heatmap with hardcoded safe defaults — never reads DOM inputs
+const SAFE_OPTS = {vMin:0.95, vMax:1.05, iLim:1.00, xKVA:5000};
+setTimeout(() => runHeatmap(SAFE_OPTS), 80);
+
+log('Stress preset loaded: 3×150 kW at buses 18, 25, 33. Click ▶ Run AC Power Flow Analysis.','info');
+</script>
+</body>
+</html>
