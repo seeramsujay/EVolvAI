@@ -258,25 +258,22 @@ class GenerativeCounterfactualVAE(nn.Module):
 
 
 def vae_loss_function(recon_x: torch.Tensor, x: torch.Tensor,
-                      mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-    """β-VAE loss: MSE reconstruction + KL divergence (both mean-reduced).
+                      mu: torch.Tensor, logvar: torch.Tensor,
+                      physics_loss: torch.Tensor = torch.tensor(0.0)) -> torch.Tensor:
+    """β-VAE loss: MSE reconstruction + KL divergence + Physics Penalty.
 
-    Both terms use reduction='mean' so the loss is normalised per element and
-    is not affected by batch size.  This makes the LEARNING_RATE and KLD_WEIGHT
-    hyperparameters transferable between runs with different BATCH_SIZE values.
-
-    L = MSE(x̂, x) + β · KL[q(Z|X) ‖ N(0, I)]
-    KL = −½ Σ (1 + log σ² − μ² − σ²)
+    L = MSE(x̂, x) + β · KL[q(Z|X) ‖ N(0, I)] + Physics Penalty
 
     Args:
         recon_x: Reconstructed output [B, F, T].
         x:       Original input [B, F, T].
         mu:      Encoder mean [B, latent_dim].
         logvar:  Encoder log-variance [B, latent_dim].
+        physics_loss: Aggregated LinDistFlow penalty scalar.
 
     Returns:
         Scalar loss tensor.
     """
     recon = F.mse_loss(recon_x, x, reduction="mean")
     kld   = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-    return recon + config.KLD_WEIGHT * kld
+    return recon + config.KLD_WEIGHT * kld + physics_loss

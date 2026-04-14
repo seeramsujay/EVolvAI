@@ -16,19 +16,25 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # ─── Grid Topology ────────────────────────────────────────────────────────────
-NUM_NODES = 50
-"""int: Number of spatial nodes in the power-grid graph.
-Each node corresponds to a transformer / distribution bus.  Changing this
-requires regenerating the data loader and retraining from scratch."""
+NUM_NODES = 32
+"""int: Number of spatial load nodes in the power-grid graph (IEEE 33-Bus, 
+excluding substation node 1). Changing this requires retraining from scratch."""
 
 SEQ_LEN = 24
 """int: Temporal resolution – one profile = 24 hourly slots (midnight to 23:00)."""
 
-NUM_WEATHER_FEATURES = 3
-"""int: Number of weather channels appended to each charging sample.
+# ─── Physics Penalties ────────────────────────────────────────────────────────
+LAMBDA_VOLT = 1.0
+LAMBDA_THERMAL = 2.0
+LAMBDA_XFMR = 2.0
+"""float: Weights for the LinDistFlow physics-informed losses."""
+
+NUM_WEATHER_FEATURES = 4
+"""int: Number of weather/environment channels appended to each charging sample.
   Channel 0 – temperature (°C)
   Channel 1 – precipitation (mm/hr)
   Channel 2 – wind speed (m/s)
+  Channel 3 – traffic index (0.0=empty, 1.0=gridlock)
 """
 
 NUM_FEATURES = NUM_NODES + NUM_WEATHER_FEATURES

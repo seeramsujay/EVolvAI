@@ -61,6 +61,9 @@ def train(epochs: int = config.EPOCHS, save: bool = True):
         config.BASELINE_CONDITION, dtype=torch.float32, device=device,
     )
 
+    from .physics_loss import LinDistFlowLoss
+    physics_engine = LinDistFlowLoss(device)
+
     model.train()
     for epoch in range(1, epochs + 1):
         epoch_loss = 0.0
@@ -76,7 +79,18 @@ def train(epochs: int = config.EPOCHS, save: bool = True):
 
             optimizer.zero_grad()
             recon, mu, logvar = model(x, cond)
-            loss = vae_loss_function(recon, x, mu, logvar)
+
+            # Calculate Physics Loss using the reconstructed EV demand (first config.NUM_NODES features)
+            # Permute to [B, T, nodes] so time and batch map nicely
+            ev_demand = recon[:, :config.NUM_NODES, :].permute(0, 2, 1)
+            
+            # The physics engine takes the demand and computes standard violations
+            pen_v, pen_therm, pen_xfmr = physics_engine(ev_demand)
+            physics_loss = (config.LAMBDA_VOLT * pen_v +
+                            config.LAMBDA_THERMAL * pen_therm +
+                            config.LAMBDA_XFMR * pen_xfmr)
+
+            loss = vae_loss_function(recon, x, mu, logvar, physics_loss)
             loss.backward()
 
             # Clip gradient norm to avoid spikes on early epochs.
