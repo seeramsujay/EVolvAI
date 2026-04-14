@@ -1,62 +1,174 @@
+import argparse
+import logging
+import os
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-def bootstrap_acn_to_tensor(acn_sessions_df: pd.DataFrame, num_samples: int = 5000, n_nodes: int = 32) -> np.ndarray:
-    """
-    Transforms raw ACN charging sessions into a (num_samples, 24, n_nodes) tensor
-    using bootstrapping and traffic-weighted spatial distribution.
-    
-    Expected columns in acn_sessions_df: ['arrival_hour', 'energy_delivered_kwh']
-    """
-    print(f"Bootstrapping {num_samples} daily scenarios from {len(acn_sessions_df)} historical sessions...")
-    
-    # 1. Initialize the empty tensor (Samples x 24 hours x 32 nodes)
-    demand_tensor = np.zeros((num_samples, 24, n_nodes))
-    
-    # 2. The Traffic Weighting (Spatial Distribution)
-    # Sujay will replace this mock array with his ACTUAL Census/OSMnx Traffic Index
-    # Higher index = busier intersection = higher probability of an EV parking there
-    mock_traffic_index = np.random.beta(a=2.0, b=5.0, size=n_nodes) 
-    traffic_probs = mock_traffic_index / np.sum(mock_traffic_index) # Normalize to 1.0
-    
-    # 3. Bootstrapping Loop
-    # Assume Boulder sees an average of ~400 charging sessions a day across this grid
-    sessions_per_day_mean = 400 
-    
-    for i in range(num_samples):
-        # Add real-world variance (e.g., weekends vs weekdays)
-        daily_session_count = int(max(50, np.random.normal(sessions_per_day_mean, scale=80)))
-        
-        # Sample real sessions with replacement (The Bootstrap)
-        daily_sessions = acn_sessions_df.sample(n=daily_session_count, replace=True)
-        
-        for _, session in daily_sessions.iterrows():
-            # Extract the real human behavior (when they plug in, how much they need)
-            # Ensuring hour is strictly bounded between 0 and 23
-            arrival_hour = int(session['arrival_hour']) % 24 
-            energy_kwh = float(session['energy_delivered_kwh'])
-            
-            # Assign the car to a physical node based strictly on the traffic flow
-            assigned_node = np.random.choice(np.arange(n_nodes), p=traffic_probs)
-            
-            # Map the demand spike
-            demand_tensor[i, arrival_hour, assigned_node] += energy_kwh
-            
-    print(f"Extraction Complete! Output Tensor Shape: {demand_tensor.shape}")
-    print(f"Zero-Output Check: {np.mean(demand_tensor == 0)*100:.2f}% sparsity (Target: < 95%)")
-    
-    return demand_tensor
+from data_pipeline.traffic_preprocess import build_hourly_traffic_tensor
 
-if __name__ == "__main__":
-    # --- MOCK USAGE FOR SUJAY TO TEST ---
-    # Simulating 10,000 rows of raw Caltech ACN data
-    mock_acn_data = pd.DataFrame({
-        'arrival_hour': np.random.normal(loc=17, scale=3, size=10000).astype(int), # Peak at 5 PM
-        'energy_delivered_kwh': np.random.exponential(scale=20.0, size=10000)      # Avg 20 kWh
+logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
+log = logging.getLogger(__name__)
+
+REPO_ROOT = Path(__file__).resolve().parent
+PROC_DIR = REPO_ROOT / "data" / "processed"
+OUT_PARQUET = PROC_DIR / "train_data.parquet"
+NUM_NODES = 32
+
+def parse_acn_data(csv_path: str) -> pd.DataFrame:
+    """Load ACN data and parse to sessions with date and start hour."""
+    log.info("Loading ACN CSV: %s", csv_path)
+    df = pd.read_csv(csv_path)
+    df.columns = df.columns.str.strip()
+    
+    col_map = {}
+    for col in df.columns:
+        lc = col.lower().replace(" ", "")
+        if "connection" in lc: col_map[col] = "connectionTime"
+        elif "disconnect" in lc: col_map[col] = "disconnectTime"
+        elif "kwh" in lc or "energy" in lc: col_map[col] = "kWhDelivered"
+        elif "user" in lc or "ev" in lc: col_map[col] = "userID"
+    df = df.rename(columns=col_map)
+    
+    df["connectionTime"] = pd.to_datetime(df["connectionTime"], utc=True, errors="coerce")
+    df["disconnectTime"] = pd.to_datetime(df["disconnectTime"], utc=True, errors="coerce")
+    df["kWhDelivered"] = pd.to_numeric(df["kWhDelivered"], errors="coerce")
+    
+    df = df.dropna(subset=["connectionTime", "disconnectTime", "kWhDelivered"])
+    df = df[df["kWhDelivered"] > 0]
+    
+    df["duration_h"] = ((df["disconnectTime"] - df["connectionTime"]).dt.total_seconds() / 3600).clip(lower=0.5)
+    df["avg_kw"] = df["kWhDelivered"] / df["duration_h"]
+    df["start_date"] = df["connectionTime"].dt.date
+    df["start_hour"] = df["connectionTime"].dt.hour
+    
+    log.info("Parsed %d valid ACN sessions.", len(df))
+    return df
+
+def generate_mock_acn_data(days=100) -> pd.DataFrame:
+    """Generate fake ACN-like sessions if CSV is missing."""
+    log.info("Generating mock ACN data for %d historical days...", days)
+    rng = np.random.default_rng(42)
+    base_date = pd.Timestamp("2021-01-01")
+    records = []
+    for d in range(days):
+        date_str = (base_date + pd.Timedelta(days=d)).date()
+        n_sessions = int(rng.normal(150, 30))
+        for _ in range(max(10, n_sessions)):
+            hour = int(rng.normal(12, 4)) % 24
+            duration = rng.uniform(1.0, 8.0)
+            kwh = rng.uniform(5.0, 50.0)
+            records.append({
+                "start_date": date_str,
+                "start_hour": hour,
+                "duration_h": duration,
+                "avg_kw": kwh / duration,
+                "kWhDelivered": kwh
+            })
+    return pd.DataFrame(records)
+
+def bootstrap_daily_scenarios(historical_df: pd.DataFrame, num_scenarios: int = 5000, num_nodes: int = NUM_NODES) -> pd.DataFrame:
+    """Bootstrap 5000 daily scenarios grouped by day, distributing via traffic index."""
+    log.info("Group Caltech ACN data by DAY...")
+    # Group by historical day
+    daily_groups = dict(tuple(historical_df.groupby("start_date")))
+    historical_days = list(daily_groups.keys())
+    
+    log.info("Building hourly traffic tensor for distribution...")
+    # traffic_index: (24, NUM_NODES)
+    traffic_index = build_hourly_traffic_tensor(num_nodes=num_nodes, try_real_data=False)
+    # Convert traffic index to probabilities per hour
+    # For each hour, prob of node = traffic / sum(traffic)
+    hour_node_probs = np.zeros_like(traffic_index)
+    for h in range(24):
+        s = traffic_index[h].sum()
+        if s > 0:
+            hour_node_probs[h] = traffic_index[h] / s
+        else:
+            hour_node_probs[h] = 1.0 / num_nodes
+            
+    log.info("Bootstrapping %d daily scenarios...", num_scenarios)
+    rng = np.random.default_rng(1337)
+    
+    # Pre-allocate output arrays for speed
+    # We need 1 record per (day, hour, node)
+    out_dates = []
+    out_hours = []
+    out_nodes = []
+    out_kw = []
+    
+    base_gen_date = pd.Timestamp("2025-01-01")
+    
+    nodes = np.arange(num_nodes)
+    
+    for i in range(num_scenarios):
+        # Sample a historical day uniformly
+        sampled_day = rng.choice(historical_days)
+        sessions_df = daily_groups[sampled_day]
+        
+        gen_date_str = (base_gen_date + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
+        
+        # Accumulate demand for this day
+        # shape: (24, 32)
+        day_demand = np.zeros((24, num_nodes))
+        
+        # Distribute individual sessions across nodes
+        for _, row in sessions_df.iterrows():
+            sh = int(row["start_hour"])
+            dur = int(round(row["duration_h"]))
+            kw = row["avg_kw"]
+            
+            # Select node based on traffic index at start hour
+            chosen_node = rng.choice(nodes, p=hour_node_probs[sh])
+            
+            # Distribute power across duration
+            for h_offset in range(dur):
+                h = (sh + h_offset) % 24
+                day_demand[h, chosen_node] += kw
+                
+        # Append to output
+        for h in range(24):
+            for n in range(num_nodes):
+                out_dates.append(gen_date_str)
+                out_hours.append(h)
+                out_nodes.append(f"node_{n:02d}")
+                out_kw.append(day_demand[h, n])
+                
+        if (i+1) % 500 == 0:
+            log.info("  Generated %d / %d scenarios", i+1, num_scenarios)
+            
+    log.info("Compiling daily scenarios into DataFrame...")
+    final_df = pd.DataFrame({
+        "date": out_dates,
+        "hour": out_hours,
+        "node_id": out_nodes,
+        "demand_kw": out_kw
     })
     
-    # Generate 5,000 days of data mapped to the 32 IEEE buses
-    training_tensor = bootstrap_acn_to_tensor(mock_acn_data, num_samples=5000, n_nodes=32)
+    return final_df
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csv", help="Path to ACN data CSV")
+    parser.add_argument("--scenarios", type=int, default=5000, help="Number of scenarios to generate")
+    args = parser.parse_args()
     
-    # Save for the Generative Core
-    np.save('bootstrapped_demand_tensor_32nodes.npy', training_tensor)
+    if args.csv and os.path.exists(args.csv):
+        df = parse_acn_data(args.csv)
+    else:
+        if args.csv:
+            log.warning("CSV not found: %s. Falling back to mock data.", args.csv)
+        df = generate_mock_acn_data()
+        
+    final_df = bootstrap_daily_scenarios(df, num_scenarios=args.scenarios, num_nodes=NUM_NODES)
+    
+    PROC_DIR.mkdir(parents=True, exist_ok=True)
+    final_df.to_parquet(OUT_PARQUET, index=False)
+    size_mb = OUT_PARQUET.stat().st_size / 1e6
+    log.info("Saved bootstrapped dataset → %s  (%.2f MB)", OUT_PARQUET, size_mb)
+    log.info("Shape: %s, Dates: %d, Nodes: %d", final_df.shape, final_df["date"].nunique(), final_df["node_id"].nunique())
+    
+if __name__ == "__main__":
+    main()
