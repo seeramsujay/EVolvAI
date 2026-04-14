@@ -1,68 +1,67 @@
 """
-build_notebook.py  — regenerates EVolvAI_Training.ipynb
+build_notebook.py  — regenerates EVolvAI_Training.ipynb from train.py logic
 Run from repo root: python3 build_notebook.py
 """
 import json, os
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# ─── helpers ─────────────────────────────────────────────────────────────────
-def code(src: str) -> dict:
+def code(src): 
     lines = src.split("\n")
     source = [l + "\n" for l in lines[:-1]] + ([lines[-1]] if lines[-1] else [])
-    return {"cell_type": "code", "metadata": {}, "outputs": [],
-            "execution_count": None, "source": source}
+    return {"cell_type": "code", "metadata": {}, "outputs": [], "execution_count": None, "source": source}
 
-def md(src: str) -> dict:
+def md(src):
     lines = src.split("\n")
     source = [l + "\n" for l in lines[:-1]] + ([lines[-1]] if lines[-1] else [])
     return {"cell_type": "markdown", "metadata": {}, "source": source}
 
-# ─── cells ───────────────────────────────────────────────────────────────────
 CELLS = []
 
+# ── Title ─────────────────────────────────────────────────────────────────────
 CELLS.append(md("""\
-# 🔋 EVolvAI — Physics-Informed Generative Counterfactual VAE
-## Full self-contained training notebook · Google Colab (CPU or GPU)
+# 🔋 EVolvAI — Physics-Informed TCN-VAE
+## Self-contained Colab training notebook  ·  mirrors `train.py` exactly
 
-This notebook:
-1. **Clones** the EVolvAI repo so it always uses the latest code.
-2. **Generates** synthetic EV demand via a fast Python port of Lochan's MATLAB
-   scenario generator (`GenerateRandomSchedule_new_ScenerioGenerator.m`).
-3. **Trains** the physics-informed (LinDistFlow) TCN-VAE with KLD annealing.
-4. **Saves** the model checkpoint + counterfactual `.npy` files to Drive.
+Pipeline:
+1. Clone repo → import all modules from `generative_core/`
+2. Build dataset — real parquet if present, synthetic fallback otherwise
+3. Train with **KLD annealing** (β: 0→1) + **physics annealing** (λ: 0→full)
+4. Save checkpoint + generate counterfactual scenarios
+5. Inline quality check — then `python3 tester.py` for the full report
 
-> 💡 Edit **only Cell 3 (Hyperparameters)**. Run all with `Ctrl+F9`.
+> 💡 Edit **only Cell 3 (Config)**. Run all: `Ctrl+F9`.
 """))
 
-# ── 0: install ────────────────────────────────────────────────────────────
+# ── 0: install ─────────────────────────────────────────────────────────────────
+CELLS.append(md("## 0 · Install & Imports"))
 CELLS.append(code("""\
-!pip install -q torch numpy pandas pyarrow scipy matplotlib
-import sys, torch
+!pip install -q torch numpy pandas pyarrow scipy matplotlib requests
+import sys, os, time, datetime
+import numpy as np
+import torch
 print("Python :", sys.version.split()[0])
 print("PyTorch:", torch.__version__)
 print("CUDA   :", torch.cuda.is_available())
 """))
 
-# ── 1: mount drive ────────────────────────────────────────────────────────
-CELLS.append(md("## 0 · Mount Google Drive *(optional — keeps checkpoint safe)*"))
+# ── 1: mount drive ─────────────────────────────────────────────────────────────
+CELLS.append(md("## 1 · Mount Drive *(optional but recommended)*"))
 CELLS.append(code("""\
 try:
     from google.colab import drive
     drive.mount('/content/drive')
     DRIVE_DIR = "/content/drive/MyDrive/EVolvAI_output"
-    import os; os.makedirs(DRIVE_DIR, exist_ok=True)
+    os.makedirs(DRIVE_DIR, exist_ok=True)
     print("Drive mounted ✓  backups →", DRIVE_DIR)
 except Exception as e:
     DRIVE_DIR = None
     print("Drive not mounted:", e)
 """))
 
-# ── 2: clone repo ─────────────────────────────────────────────────────────
-CELLS.append(md("## 1 · Clone Repo"))
+# ── 2: clone ───────────────────────────────────────────────────────────────────
+CELLS.append(md("## 2 · Clone Repo"))
 CELLS.append(code("""\
-import os, sys
-
 REPO_URL = "https://github.com/seeramsujay/EVolvAI.git"
 REPO_DIR = "/content/EVolvAI"
 
@@ -78,250 +77,151 @@ os.chdir(REPO_DIR)
 print("Working directory:", os.getcwd())
 """))
 
-# ── 3: hyperparameters ────────────────────────────────────────────────────
-CELLS.append(md("## 2 · Hyperparameters — *edit here only*"))
+# ── 3: config ──────────────────────────────────────────────────────────────────
+CELLS.append(md("## 3 · Config — *edit only here*"))
 CELLS.append(code("""\
-# ── TRAINING ─────────────────────────────────────────────────────────────
-EPOCHS          = 500      # 500 ≈ 2 hrs CPU | 30 min T4 GPU
-BATCH_SIZE      = 64       # raised: more gradient signal per step
-LEARNING_RATE   = 1e-3
-GRAD_CLIP_NORM  = 1.0
+# ── TRAINING ─────────────────────────────────────────────────────────────────
+EPOCHS         = 500       # 500 ≈ 2-3 hrs CPU | ~30 min T4 GPU
+BATCH_SIZE     = 64
+LEARNING_RATE  = 1e-3
+GRAD_CLIP_NORM = 1.0
+LOG_EVERY      = 25        # print progress every N epochs
+OUTPUT_DIR     = os.path.join(REPO_DIR, "output")
 
-# KLD annealing: β ramps from 0 → KLD_WEIGHT_FINAL over KLD_ANNEAL_EPOCHS
-# This prevents posterior collapse (the 62%-zeros problem from the 50-epoch run)
-KLD_WEIGHT_FINAL  = 1.0
-KLD_ANNEAL_EPOCHS = 100    # β reaches 1.0 at epoch 100; stays there
+# ── KLD ANNEALING ─────────────────────────────────────────────────────────────
+# β ramps linearly from 0 → KLD_MAX over KLD_ANNEAL_EPOCHS epochs.
+# Prevents posterior collapse: decoder learns reconstruction *before*
+# the prior enforces structure.
+KLD_MAX          = 1.0
+KLD_ANNEAL_EPOCHS = 100
 
-# ── LOCHAN SCENARIO GENERATOR ─────────────────────────────────────────────
-# Mirrors InputParameters_ScenerioGenerator.m exactly
-SG_TOTAL_EVS      = 100
-SG_PEN_LEVEL      = 65
-SG_TIME_INTERVALS = [0, 3, 7, 11, 14, 17, 19, 21, 24]
-SG_CAR_DIST_RAW   = [6, 0, 5,  7, 17, 26, 22, 17]
-SG_BC             = [22, 32, 40, 60]   # kWh
-SG_CHARGING_POWER = 7.0                # kW
-SG_CHARGERS_COUNT = 10
-SG_MAX_WAIT_SEC   = 15 * 60
+# ── PHYSICS ANNEALING ─────────────────────────────────────────────────────────
+# λ ramps from 0 → full over PHYS_ANNEAL_EPOCHS.
+# Physics lambdas in config.py are set to 0.0 (isolation phase).
+# This annealing re-enables them gradually once the VAE has learned to reconstruct.
+PHYS_ANNEAL_EPOCHS = 150
 
-# ── DATASET ──────────────────────────────────────────────────────────────
-NUM_SYNTHETIC_DAYS = 2000   # fast vectorised generator — ~3 sec total
+# ── LR SCHEDULE ──────────────────────────────────────────────────────────────
+LR_STEP  = 150    # halve LR every N epochs
+LR_GAMMA = 0.5
 
-print(f"Config: EPOCHS={EPOCHS}  BATCH={BATCH_SIZE}  LR={LEARNING_RATE}")
-print(f"KLD annealing: 0 → {KLD_WEIGHT_FINAL} over {KLD_ANNEAL_EPOCHS} epochs")
-print(f"Dataset: {NUM_SYNTHETIC_DAYS} synthetic days")
+print(f"Epochs={EPOCHS}  Batch={BATCH_SIZE}  LR={LEARNING_RATE}")
+print(f"KLD  anneal: β 0→{KLD_MAX}  over {KLD_ANNEAL_EPOCHS} epochs")
+print(f"Phys anneal: λ 0→1.0 over {PHYS_ANNEAL_EPOCHS} epochs")
 """))
 
-# ── 4: fast lochan generator ──────────────────────────────────────────────
-CELLS.append(md("""\
-## 3 · Fast EV Scenario Generator (Lochan's MATLAB → vectorised Python)
-
-Key fix vs. the slow version: replaced the hit-or-miss while-loop with
-`np.random.multinomial`, making 2000 days run in ~3 s instead of 30+ min.
-"""))
-CELLS.append(code("""\
-import numpy as np
-
-def _car_dist(raw, pen, total):
-    return [round(v * pen * total / 10000) for v in raw]
-
-def lochan_daily_demand_kw(
-    num_nodes   : int   = 32,
-    rng         : np.random.Generator = None,
-) -> np.ndarray:
-    \"\"\"
-    Vectorised port of GenerateRandomSchedule_new_ScenerioGenerator.m.
-    Returns shape [24, num_nodes] in kW.
-    
-    Key changes vs. the slow version
-    ---------------------------------
-    * Car distribution across slots → np.random.multinomial  (O(1) vs. while-loop)
-    * Charger queue  → numpy cumsum instead of Python for-loop
-    * Per-node spatial split → Dirichlet weights
-    \"\"\"
-    if rng is None:
-        rng = np.random.default_rng()
-
-    car_dist      = _car_dist(SG_CAR_DIST_RAW, SG_PEN_LEVEL, SG_TOTAL_EVS)
-    time_slots_t  = 24 * 3600          # seconds in a day
-    sec_per_15min = 15 * 60            # 900 s
-
-    # Build per-second aggregate charging load across all EVs ─────────────
-    power_sec = np.zeros(time_slots_t, dtype=np.float32)
-
-    for i, num_cars in enumerate(car_dist):
-        if num_cars == 0:
-            continue
-        t_start_15 = SG_TIME_INTERVALS[i] * 4       # 15-min slots
-        t_end_15   = SG_TIME_INTERVALS[i+1] * 4
-        n_slots    = t_end_15 - t_start_15
-        if n_slots < 1:
-            continue
-
-        # Distribute cars across slots using multinomial (fast!)
-        slots_cars = rng.multinomial(num_cars, np.ones(n_slots) / n_slots)
-
-        for slot_offset, noc in enumerate(slots_cars):
-            if noc == 0:
-                continue
-            slot_abs = t_start_15 + slot_offset          # 15-min slot index
-
-            for _ in range(int(noc)):
-                bc       = float(rng.choice(SG_BC))
-                soc_act  = rng.integers(5, 81)
-                soc_max  = rng.integers(int(soc_act) + 5, 101)
-                e_needed = (soc_max - soc_act) * bc * 3600 / 100   # kWs
-                duration = int(e_needed / SG_CHARGING_POWER)        # seconds
-
-                # Start second = slot start + random offset within the 15-min slot
-                ev_start = int(slot_abs * sec_per_15min
-                               + rng.integers(0, sec_per_15min + 1))
-                ev_start = min(ev_start, time_slots_t - 1)
-                ev_end   = min(ev_start + duration, time_slots_t)
-
-                # Charger gate: limit to SG_CHARGERS_COUNT concurrent
-                # (simplified: check occupancy at start second only)
-                if power_sec[ev_start] < SG_CHARGERS_COUNT * SG_CHARGING_POWER:
-                    power_sec[ev_start:ev_end] += SG_CHARGING_POWER
-
-    # Downsample to 24 hourly averages ─────────────────────────────────────
-    hourly_kw = power_sec.reshape(24, 3600).mean(axis=1)   # [24]
-
-    # Distribute across nodes with Dirichlet weights ───────────────────────
-    weights = rng.dirichlet(np.ones(num_nodes) * 0.8).astype(np.float32)
-    return (hourly_kw[:, None] * weights[None, :]).astype(np.float32)  # [24, nodes]
-
-
-# ── sanity check ─────────────────────────────────────────────────────────────
-import time
-_rng  = np.random.default_rng(42)
-_s    = lochan_daily_demand_kw(rng=_rng)
-print(f"Sample day shape : {_s.shape}  range=[{_s.min():.3f}, {_s.max():.3f}] kW")
-print(f"Peak hour        : {_s.mean(axis=1).argmax()}:00")
-"""))
-
-# ── 5: build dataset ──────────────────────────────────────────────────────
-CELLS.append(md("## 4 · Generate Full Dataset in RAM"))
-CELLS.append(code("""\
-import time
-
-N_NODES = 32
-N_DAYS  = NUM_SYNTHETIC_DAYS
-
-print(f"Generating {N_DAYS} days…")
-t0    = time.time()
-master_rng = np.random.default_rng(seed=42)
-
-demand_data = np.stack(
-    [lochan_daily_demand_kw(num_nodes=N_NODES, rng=master_rng) for _ in range(N_DAYS)],
-    axis=0,
-)  # [N_DAYS, 24, 32]
-
-dt = time.time() - t0
-print(f"Done in {dt:.1f}s   shape={demand_data.shape}")
-print(f"RAM      : {demand_data.nbytes/1e6:.1f} MB")
-print(f"kW range : [{demand_data.min():.2f}, {demand_data.max():.2f}]")
-print(f"Mean kW  : {demand_data.mean():.3f}")
-"""))
-
-# ── 6: import repo modules ────────────────────────────────────────────────
-CELLS.append(md("## 5 · Import Model & Physics Engine from Repo"))
+# ── 4: import modules ──────────────────────────────────────────────────────────
+CELLS.append(md("## 4 · Import Repo Modules"))
 CELLS.append(code("""\
 from generative_core import config as CFG
+from generative_core.data_loader import get_dataloader
 from generative_core.models import GenerativeCounterfactualVAE, vae_loss_function
 from generative_core.physics_loss import LinDistFlowLoss
-import torch, torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+import torch.optim as optim
 
-# Push notebook hyperparameters into config
-CFG.NUM_NODES     = N_NODES
+# Push notebook config into CFG
+CFG.EPOCHS        = EPOCHS
 CFG.BATCH_SIZE    = BATCH_SIZE
 CFG.LEARNING_RATE = LEARNING_RATE
 
-print("Repo modules imported ✓")
-for k in ["NUM_NODES","NUM_FEATURES","LATENT_DIM","COND_DIM","TCN_CHANNELS"]:
-    print(f"  {k:20s} = {getattr(CFG, k)}")
+print("Imports OK ✓")
+print(f"  LATENT_DIM    = {CFG.LATENT_DIM}")
+print(f"  TCN_CHANNELS  = {CFG.TCN_CHANNELS}")
+print(f"  NUM_FEATURES  = {CFG.NUM_FEATURES}")
+print(f"  COND_DIM      = {CFG.COND_DIM}")
+print(f"  DECODER_HIDDEN= {CFG.DECODER_HIDDEN}")
+parquet_ok = os.path.isfile(CFG.DATA_PATH)
+print(f"  Data source   : {'real parquet ✅' if parquet_ok else 'synthetic fallback ⚠'}")
 """))
 
-# ── 7: dataset wrapper ────────────────────────────────────────────────────
-CELLS.append(md("## 6 · PyTorch Dataset"))
-CELLS.append(code("""\
-class LochanEVDataset(Dataset):
-    \"\"\"Wraps in-RAM demand array; appends synthetic weather channels.\"\"\"
-
-    def __init__(self, demand: np.ndarray, rng_seed: int = 0):
-        n, seq, nodes = demand.shape
-        rng = np.random.default_rng(rng_seed)
-
-        weather = rng.uniform(-10, 40,
-                              (n, seq, CFG.NUM_WEATHER_FEATURES)).astype(np.float32)
-
-        def znorm(a):
-            std = a.std()
-            return (a - a.mean()) / (std + 1e-8) if std > 1e-8 else a - a.mean()
-
-        self.data = np.concatenate([znorm(demand), znorm(weather)], axis=-1).astype(np.float32)
-        print(f"Dataset: {self.data.shape}  dtype={self.data.dtype}")
-
-    def __len__(self): return len(self.data)
-
-    def __getitem__(self, idx):
-        return torch.from_numpy(self.data[idx])   # [24, num_features]
-
-
-dataset = LochanEVDataset(demand_data)
-loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-print(f"Batches/epoch: {len(loader)}")
-"""))
-
-# ── 8: training loop with KLD annealing ──────────────────────────────────
+# ── 5: build dataset ───────────────────────────────────────────────────────────
 CELLS.append(md("""\
-## 7 · Training Loop — with KLD Annealing
+## 5 · Build Dataset
 
-**What KLD annealing fixes:**  
-In the 50-epoch test run, ~62% of output nodes were zero (posterior collapse).
-This happens because the KLD term pushes Z → N(0,I) too aggressively in early
-epochs before the decoder can learn.  By warming β from 0 → 1 over 100 epochs,
-the decoder trains on reconstruction first, then the prior is enforced gently.
+`get_dataloader()` automatically:
+- Reads `data/processed/train_data.parquet` if present (real ACN-Data)
+- Falls back to the synthetic Lochan generator otherwise
+
+Each batch → `(x, cond)` where `cond` is a **dynamic, per-date condition vector**
+computed from the actual date in the parquet (weekend flag, solar from DOY, traffic pattern).
 """))
 CELLS.append(code("""\
-import time, os
+torch.manual_seed(42)
+np.random.seed(42)
 
+loader = get_dataloader(batch_size=BATCH_SIZE)
+print(f"Batches/epoch : {len(loader)}")
+"""))
+
+# ── 6: build model ─────────────────────────────────────────────────────────────
+CELLS.append(md("## 6 · Build Model"))
+CELLS.append(code("""\
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
 
 model          = GenerativeCounterfactualVAE().to(device)
 optimizer      = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 physics_engine = LinDistFlowLoss(device)
-scheduler      = optim.lr_scheduler.StepLR(optimizer, step_size=150, gamma=0.5)
+scheduler      = optim.lr_scheduler.StepLR(optimizer, step_size=LR_STEP, gamma=LR_GAMMA)
 
-baseline_cond = torch.tensor(CFG.BASELINE_CONDITION, dtype=torch.float32, device=device)
+total_params = sum(p.numel() for p in model.parameters())
+print(f"Parameters : {total_params:,}")
+print(f"TCN        : {CFG.TCN_CHANNELS}")
+print(f"Latent dim : {CFG.LATENT_DIM}")
+"""))
 
-history = {"loss": [], "beta": [], "phys": []}
+# ── 7: training loop ──────────────────────────────────────────────────────────
+CELLS.append(md("""\
+## 7 · Training Loop
+
+Two simultaneous annealing schedules:
+- **β (KLD)**: 0→1 over first 100 epochs — decoder learns freely first
+- **λ (physics)**: 0→full over first 150 epochs — grid constraints introduced gently
+
+Since `LAMBDA_VOLT/THERMAL/XFMR` are set to **0.0** in `config.py` (isolation phase),
+the physics annealing here acts as the only physics pressure — and it starts at zero.
+"""))
+CELLS.append(code("""\
+# Store base lambdas from config (all 0.0 during isolation, re-enable later)
+_lv = CFG.LAMBDA_VOLT
+_lt = CFG.LAMBDA_THERMAL
+_lx = CFG.LAMBDA_XFMR
+
+history = []
 t_start = time.time()
 
 model.train()
 for epoch in range(1, EPOCHS + 1):
 
-    # ── KLD annealing: linearly ramp β from 0 → KLD_WEIGHT_FINAL ──────────
-    beta = min(1.0, epoch / KLD_ANNEAL_EPOCHS) * KLD_WEIGHT_FINAL
-    CFG.KLD_WEIGHT = beta
+    # ── KLD annealing: β 0 → KLD_MAX ─────────────────────────────────────
+    beta = min(1.0, epoch / KLD_ANNEAL_EPOCHS) * KLD_MAX
+
+    # ── Physics annealing: λ 0 → full ────────────────────────────────────
+    lam = min(1.0, epoch / PHYS_ANNEAL_EPOCHS)
+    CFG.LAMBDA_VOLT    = _lv * lam
+    CFG.LAMBDA_THERMAL = _lt * lam
+    CFG.LAMBDA_XFMR    = _lx * lam
 
     epoch_loss = epoch_phys = 0.0
     n_batches  = 0
 
-    for batch in loader:
-        x    = batch.permute(0, 2, 1).to(device)          # [B, features, 24]
-        cond = baseline_cond.unsqueeze(0).expand(x.size(0), -1)
+    for x, cond in loader:
+        # x    : [B, NUM_FEATURES, SEQ_LEN] — channel-first (from EVDemandDataset)
+        # cond : [B, COND_DIM]              — dynamic per-date condition
+        x    = x.to(device)
+        cond = cond.to(device)
 
         optimizer.zero_grad()
         recon, mu, logvar = model(x, cond)
 
-        ev_demand = recon[:, :CFG.NUM_NODES, :].permute(0, 2, 1)   # [B, 24, 32]
+        ev_demand = recon[:, :CFG.NUM_NODES, :].permute(0, 2, 1)  # [B, 24, 32]
         pen_v, pen_therm, pen_xfmr = physics_engine(ev_demand)
-        phys = (CFG.LAMBDA_VOLT * pen_v + CFG.LAMBDA_THERMAL * pen_therm
-                + CFG.LAMBDA_XFMR * pen_xfmr)
+        phys = (CFG.LAMBDA_VOLT    * pen_v
+              + CFG.LAMBDA_THERMAL * pen_therm
+              + CFG.LAMBDA_XFMR   * pen_xfmr)
 
-        loss = vae_loss_function(recon, x, mu, logvar, phys)
+        loss = vae_loss_function(recon, x, mu, logvar, phys,
+                                 current_kld_weight=beta)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
         optimizer.step()
@@ -333,111 +233,131 @@ for epoch in range(1, EPOCHS + 1):
     scheduler.step()
     avg_loss = epoch_loss / max(n_batches, 1)
     avg_phys = epoch_phys / max(n_batches, 1)
-    history["loss"].append(avg_loss)
-    history["beta"].append(beta)
-    history["phys"].append(avg_phys)
+    history.append(avg_loss)
 
-    if epoch % 25 == 0 or epoch == 1:
+    if epoch % LOG_EVERY == 0 or epoch == 1:
         elapsed = (time.time() - t_start) / 60
+        eta     = (elapsed / epoch) * (EPOCHS - epoch)
         lr_now  = scheduler.get_last_lr()[0]
-        print(f"  Epoch {epoch:>4}/{EPOCHS}  loss={avg_loss:.5f}  "
-              f"phys={avg_phys:.5f}  β={beta:.2f}  lr={lr_now:.1e}  {elapsed:.1f}min")
+        print(f"  Epoch {epoch:>4}/{EPOCHS}  "
+              f"loss={avg_loss:.5f}  phys={avg_phys:.5f}  "
+              f"β={beta:.2f}  λ={lam:.2f}  lr={lr_now:.1e}  "
+              f"elapsed={elapsed:.1f}min  ETA={eta:.1f}min")
 
-        # Midpoint Drive backup
+        # Mid-run Drive backup every 100 epochs
         if DRIVE_DIR and epoch % 100 == 0:
-            _p = os.path.join(DRIVE_DIR, f"gcvae_ep{epoch}.pt")
-            torch.save(model.state_dict(), _p)
-            print(f"    Drive checkpoint → {_p}")
+            import shutil
+            _bk = os.path.join(DRIVE_DIR, f"gcvae_ep{epoch}.pt")
+            torch.save(model.state_dict(), _bk)
+            print(f"    Drive backup → {_bk}")
 
-total = (time.time() - t_start) / 60
-print(f"\\nTraining done in {total:.1f} min ✓")
+total_min = (time.time() - t_start) / 60
+print(f"\\nTraining done in {total_min:.1f} min ✓")
 """))
 
-# ── 9: save checkpoint ────────────────────────────────────────────────────
-CELLS.append(md("## 8 · Save Checkpoint"))
+# ── 8: save + generate ────────────────────────────────────────────────────────
+CELLS.append(md("## 8 · Save Checkpoint + Generate Counterfactuals"))
 CELLS.append(code("""\
 import shutil
 
-OUTPUT_DIR = os.path.join(REPO_DIR, "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-CKPT = os.path.join(OUTPUT_DIR, "gcvae_model.pt")
-torch.save(model.state_dict(), CKPT)
-print(f"Checkpoint → {CKPT}")
-
+# Checkpoint
+ckpt = os.path.join(OUTPUT_DIR, "gcvae_model.pt")
+torch.save(model.state_dict(), ckpt)
+print(f"Checkpoint → {ckpt}")
 if DRIVE_DIR:
-    shutil.copy(CKPT, os.path.join(DRIVE_DIR, "gcvae_model.pt"))
-    print(f"Drive backup  → {DRIVE_DIR}/gcvae_model.pt")
+    shutil.copy(ckpt, os.path.join(DRIVE_DIR, "gcvae_model.pt"))
+
+# Loss CSV
+csv_path = os.path.join(OUTPUT_DIR, "training_loss.csv")
+with open(csv_path, "w") as f:
+    f.write("epoch,avg_loss\\n")
+    for i, v in enumerate(history, 1):
+        f.write(f"{i},{v:.6f}\\n")
+print(f"Loss CSV  → {csv_path}")
+
+# Counterfactual scenarios
+print("\\nGenerating counterfactuals…")
+model.eval()
+for name, spec in CFG.SCENARIOS.items():
+    with torch.no_grad():
+        z    = torch.randn(1, CFG.LATENT_DIM, device=device)
+        cond = torch.tensor([spec["condition"]], dtype=torch.float32, device=device)
+        out  = model.decode(z, cond)
+        demand = out[:, :CFG.NUM_NODES, :].squeeze(0).permute(1, 0).cpu().numpy()
+
+    path = os.path.join(OUTPUT_DIR, f"{name}.npy")
+    np.save(path, demand)
+    zpct = (demand == 0).mean() * 100
+    flag = "✅" if zpct < 30 else "⚠️ "
+    print(f"  {flag} [{name:30s}] range=[{demand.min():.3f},{demand.max():.3f}]  zeros={zpct:.1f}%")
 """))
 
-# ── 10: loss plot ─────────────────────────────────────────────────────────
+# ── 9: loss plot ──────────────────────────────────────────────────────────────
 CELLS.append(md("## 9 · Loss Curve"))
 CELLS.append(code("""\
 import matplotlib.pyplot as plt
 
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 4))
-
-ax1.plot(history["loss"], lw=1.5, color="#4f86c6", label="Total loss")
-ax1.set(xlabel="Epoch", ylabel="Avg Loss", title="Training Loss")
-ax1.grid(alpha=0.3); ax1.legend()
-
-ax2.plot(history["beta"], lw=1.5, color="#e07b54", label="β (KLD weight)")
-ax2_r = ax2.twinx()
-ax2_r.plot(history["phys"], lw=1.5, color="#5ab26e", alpha=0.7, label="Physics penalty")
-ax2.set(xlabel="Epoch", title="KLD Annealing & Physics Penalty")
-ax2.legend(loc="upper left"); ax2_r.legend(loc="upper right")
-
+plt.figure(figsize=(10, 4))
+plt.plot(history, lw=1.5, color="#4f86c6")
+plt.xlabel("Epoch"); plt.ylabel("Avg Loss")
+plt.title("EVolvAI Training Loss — Physics-Informed TCN-VAE")
+plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(os.path.join(OUTPUT_DIR, "training_loss.png"), dpi=150)
 plt.show()
 print("Saved training_loss.png")
 """))
 
-# ── 11: counterfactuals ───────────────────────────────────────────────────
-CELLS.append(md("## 10 · Generate Counterfactual Scenarios"))
+# ── 10: inline quality check ──────────────────────────────────────────────────
+CELLS.append(md("## 10 · Inline Quality Check"))
 CELLS.append(code("""\
-model.eval()
-results = {}
+scenarios = [
+    "extreme_winter_storm", "summer_peak",
+    "full_electrification", "extreme_winter_v2", "rush_hour_gridlock",
+]
 
-for name, spec in CFG.SCENARIOS.items():
-    with torch.no_grad():
-        z    = torch.randn(1, CFG.LATENT_DIM, device=device)
-        cond = torch.tensor([spec["condition"]], dtype=torch.float32, device=device)
-        out  = model.decode(z, cond)
+print("=" * 62)
+print("  Post-training Quality Check")
+print("=" * 62)
+zero_pcts = []
+for name in scenarios:
+    p = os.path.join(OUTPUT_DIR, f"{name}.npy")
+    if not os.path.exists(p):
+        continue
+    a = np.load(p)
+    z = (a == 0).mean() * 100
+    zero_pcts.append(z)
+    flag = "✅" if z < 30 else "🟡" if z < 50 else "🔴"
+    print(f"  {flag} {name:32s}  zeros={z:.1f}%  range=[{a.min():.3f},{a.max():.3f}]")
 
-        demand = out[:, :CFG.NUM_NODES, :].squeeze(0).permute(1, 0).cpu().numpy()
-        results[name] = demand
-
-    path = os.path.join(OUTPUT_DIR, f"{name}.npy")
-    np.save(path, demand)
-    zero_pct = (demand == 0).mean() * 100
-    print(f"  [{name}]  shape={demand.shape}  "
-          f"range=[{demand.min():.3f}, {demand.max():.3f}]  "
-          f"zeros={zero_pct:.1f}%  → {path}")
-
-print("\\nAll scenarios generated ✓")
-print("\\n🎯  Health check — zeros should be < 30% after proper training:")
-for n, d in results.items():
-    z = (d == 0).mean() * 100
-    status = "✅" if z < 30 else "⚠️ "
-    print(f"   {status} {n:30s}  zeros={z:.1f}%")
+if zero_pcts:
+    avg_z = np.mean(zero_pcts)
+    print(f"\\n  Avg zeros : {avg_z:.1f}%")
+    if avg_z < 20:
+        print("  🟢  HEALTHY — ready for full 1000-epoch GPU run or handoff")
+    elif avg_z < 40:
+        print("  🟡  PARTIAL — run more epochs")
+    else:
+        print("  🔴  COLLAPSE — both annealings are ON; needs more epochs")
+print("=" * 62)
 """))
 
-# ── 12: download ──────────────────────────────────────────────────────────
-CELLS.append(md("## 11 · Download All Outputs"))
+# ── 11: download ──────────────────────────────────────────────────────────────
+CELLS.append(md("## 11 · Download Outputs"))
 CELLS.append(code("""\
 zip_path = "/content/EVolvAI_output"
 shutil.make_archive(zip_path, "zip", OUTPUT_DIR)
 print(f"Archive: {zip_path}.zip")
-
 try:
     from google.colab import files
     files.download(f"{zip_path}.zip")
 except ImportError:
-    print("Not in Colab — find outputs at:", OUTPUT_DIR)
+    print("Not in Colab — outputs at:", OUTPUT_DIR)
 """))
 
-# ─── assemble notebook ────────────────────────────────────────────────────────
+# ─── Assemble ─────────────────────────────────────────────────────────────────
 nb = {
     "nbformat": 4,
     "nbformat_minor": 5,
@@ -452,5 +372,4 @@ nb = {
 out = os.path.join(ROOT, "EVolvAI_Training.ipynb")
 with open(out, "w", encoding="utf-8") as f:
     json.dump(nb, f, indent=1, ensure_ascii=False)
-
-print(f"\n✅  Notebook written → {out}  ({len(CELLS)} cells)")
+print(f"✅  Notebook written → {out}  ({len(CELLS)} cells)")
