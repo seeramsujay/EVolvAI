@@ -6,7 +6,8 @@ Usage:
     python run.py mock        Generate mock demand tensor for async handoff
     python run.py train       Train the GCD-VAE model
     python run.py generate    Generate counterfactual scenarios from trained model
-    python run.py all         Run the full pipeline (mock → train → generate)
+    python run.py optimize    Run the Risk Engine GA to find optimal charger locations
+    python run.py all         Run the full pipeline (mock → train → generate → optimize)
 """
 
 import sys
@@ -36,25 +37,35 @@ def main():
             from generative_core.generate import generate_all_scenarios
             generate_all_scenarios()
 
+        elif cmd == "optimize":
+            from risk_engine.optimizer_ga import _demo as run_optimizer
+            run_optimizer()
+
         elif cmd == "all":
             from generative_core.mock import save_mock
             from generative_core.train import train
             from generative_core.generate import generate_all_scenarios
 
             print("=" * 60)
-            print("  STEP 1/3 – Mock Output for Async Handoff")
+            print("  STEP 1/4 – Mock Output for Async Handoff")
             print("=" * 60)
             save_mock()
 
             print("\n" + "=" * 60)
-            print("  STEP 2/3 – Training GCD-VAE")
+            print("  STEP 2/4 – Training GCD-VAE")
             print("=" * 60)
             model, device = train()
 
             print("\n" + "=" * 60)
-            print("  STEP 3/3 – Generating Counterfactual Scenarios")
+            print("  STEP 3/4 – Generating Counterfactual Scenarios")
             print("=" * 60)
             generate_all_scenarios(model=model, device=device)
+
+            print("\n" + "=" * 60)
+            print("  STEP 4/4 – Risk Engine Optimization")
+            print("=" * 60)
+            from risk_engine.optimizer_ga import _demo as run_optimizer
+            run_optimizer()
 
             print("\n✅ Full pipeline complete. Check output/ for results.")
 

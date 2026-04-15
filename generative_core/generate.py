@@ -73,10 +73,13 @@ def load_model(device: Optional[torch.device] = None):
             "Run 'python run.py train' first."
         )
     model = GenerativeCounterfactualVAE().to(device)
-    model.load_state_dict(
-        # weights_only=True prevents arbitrary code execution from foreign checkpoints.
-        torch.load(config.MODEL_SAVE_PATH, map_location=device, weights_only=True)
-    )
+    ckpt = torch.load(config.MODEL_SAVE_PATH, map_location=device, weights_only=True)
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+        state_dict = ckpt["model_state_dict"]
+    else:
+        state_dict = ckpt
+    
+    model.load_state_dict(state_dict)
     model.eval()
     return model, device
 

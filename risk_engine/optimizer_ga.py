@@ -100,9 +100,9 @@ class EVOptimizerConfig:
     cvar_alpha: float = 0.99
 
     # ── Cost model ───────────────────────────────────────────────────
-    capex_per_port: float = 45_000.0               # USD per port
-    opex_per_kwh: float = 0.12                     # USD per kWh
-    wait_time_penalty_weight: float = 500.0
+    capex_per_port: float = 15_000.0               # USD per port
+    opex_per_kwh: float = 0.50                     # USD per kWh (Increased unserved penalty)
+    wait_time_penalty_weight: float = 25000.0      # Heavily penalize long queues
     grid_penalty_weight: float = 1.0
     grid_capacity_per_node: float = 5.0            # soft cap
 
@@ -272,9 +272,9 @@ def evaluate_fitness(
     capex = config.capex_per_port * total_ports
 
     # ── 2. Wait-time penalty (vectorised over scenarios × nodes) ─────
-    #   Model: wait_time_{s,i} = demand_{s,i} / max(ports_i, 1)
+    #   Model: wait_time_{s,i} = demand_{s,i} / max(ports_i, 0.1)
     #   Higher demand with fewer ports → longer queues.
-    safe_ports = np.maximum(ports, 1.0)             # [N]  avoid /0
+    safe_ports = np.maximum(ports, 0.1)             # [N]  avoid /0
     # demand_scenarios: [S, N],  safe_ports: [N] → broadcast → [S, N]
     wait_times = demand_scenarios / safe_ports       # [S, N]
     
