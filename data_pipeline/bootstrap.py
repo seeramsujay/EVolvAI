@@ -7,12 +7,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from data_pipeline.traffic_preprocess import build_hourly_traffic_tensor
+try:
+    from .traffic_preprocess import build_hourly_traffic_tensor
+except ImportError:
+    from data_pipeline.traffic_preprocess import build_hourly_traffic_tensor
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 PROC_DIR = REPO_ROOT / "data" / "processed"
 OUT_PARQUET = PROC_DIR / "train_data.parquet"
 NUM_NODES = 32
@@ -25,7 +28,6 @@ def parse_acn_data(csv_path: str) -> pd.DataFrame:
     
     col_map = {}
     for col in df.columns:
-        lc = col.lower().replace(" ", "")
         lc = col.lower().replace(" ", "")
         if "connect" in lc and "time" in lc and "disconnect" not in lc: col_map[col] = "connectionTime"
         elif "disconnect" in lc and "time" in lc: col_map[col] = "disconnectTime"

@@ -19,7 +19,9 @@ import json
 import datetime
 import numpy as np
 
-OUTPUT = os.path.join(os.path.dirname(__file__), "output")
+# Since this is in scripts/, root is one level up
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUTPUT = os.path.join(ROOT, "output")
 
 # ─── Scenarios to check ────────────────────────────────────────────────────────
 EXPECTED_SCENARIOS = [

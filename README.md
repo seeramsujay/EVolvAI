@@ -1,50 +1,56 @@
-# EVolvAI: Generative Scenario Planning for EV Demand
+# EVolvAI: Physics-Informed Generative EV Demand Pipeline
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+**EVolvAI** is a research-grade framework for modeling and optimizing electric vehicle (EV) charging infrastructure under extreme grid constraints. By combining a Physics-Informed VAE (GCD-VAE) with a Genetic Algorithm risk engine, EVolvAI generates physically valid counterfactual demand scenarios and identifies optimal charger placements to minimize grid reliability risks.
 
-> **Causal Demand Forecasting via Generative Counterfactuals.**
+## Project Structure
 
-EVolvAI is a specialized framework designed to forecast Electric Vehicle (EV) charging demand using a **Generative Causal Demand VAE (GCD-VAE)**. The system enables "Scenario Planning" by intervening on causal factors like weather, fleet size, and traffic volume to predict grid stress.
+```text
+.
+├── generative_core/      # GCD-VAE architecture and physics-informed training
+├── data_pipeline/        # Data ingestion, weather fetching, and bootstrapping
+├── risk_engine/          # Genetic Algorithm for optimal charger placement
+├── geospatial_dashboard/ # Streamlit visualization for demand and grid risk
+├── scripts/              # Utility scripts for quality checks and builds
+├── Archives/             # Research papers, reports, and methodology
+├── data/                 # Raw and processed datasets
+└── output/               # Model checkpoints and generated scenarios
+```
 
-## 🚀 Geographic Scope: New York City
-The framework is currently calibrated for **New York City (Manhattan & Brooklyn)**, integrating:
-- **PlugNYC Data**: Extensive real-world charging session logs from NYC DOT.
-- **Caltech ACN-Data**: High-granularity behavioral distributions.
-- **IEEE 33-Bus Topology**: CAN-standard grid physics mapped to NYC neighborhoods.
+## Quick Start
 
-## 🏗️ Integrated Architecture
-The project follows a **Model-In-The-Loop** workflow:
-1. **Data Pipeline**: Sources charging behavioral data from NYC municipal datasets.
-2. **Generative Core**: Trains a TCN-VAE to learn the latent space of demand.
-3. **Scenario Generator**: Produces NumPy tensors (`.npy`) for specific counterfactuals (e.g., "Extreme Winter Storm").
-4. **Geospatial Dashboard**: A FastAPI + Streamlit interface that visualizes these tensors on a real-world map of the NYC grid.
-
-## 📂 Project Structure
-- `generative_core/`: GCD-VAE architecture, training, and generation logic.
-- `data_pipeline/`: Modules for OSMnx road network and traffic volume processing.
-- `geospatial_dashboard/`: Interactive visualization and REST API.
-- `output/`: Trained checkpoints and generated scenario tensors.
-
-## 🚦 Quick Start
-
-### Installation
+### 1. Installation
 ```bash
-git clone https://github.com/seeramsujay/EVolvAI
-cd EVolvAI
 pip install -r requirements.txt
 ```
 
-### Running the Full Pipeline
+### 2. Prepare Data
 ```bash
-# Generate scenarios from the trained model
+python data_pipeline/preprocess.py --synthetic
+python data_pipeline/bootstrap.py --scenarios 5000
+```
+
+### 3. Training & Inference
+The primary entry point is the **`Latest_Training.ipynb`** notebook, optimized for Google Colab.
+
+To run via CLI:
+```bash
+python run.py train --epochs 500
 python run.py generate
-
-# Launch Dashboard
-cd geospatial_dashboard
-pip install -r requirements.txt
-python -m uvicorn api:app --reload &
-streamlit run dashboard.py
 ```
 
-## 📜 License
-This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for details.
+### 4. Optimize Placement
+```bash
+python run.py optimize
+```
+
+### 5. Visualize
+```bash
+streamlit run geospatial_dashboard/dashboard.py
+```
+
+## Publication Context
+This repository contains the source code for the paper: *"Physics-Informed Generative Modeling of Extreme EV Demand on Distribution Grids."* focusing on a 40.7°N NYC-based case study on the IEEE 33-Bus system.
+
+---
+**License**: MIT  
+**Research Context**: Advanced Agentic Coding / Power Systems Engineering.

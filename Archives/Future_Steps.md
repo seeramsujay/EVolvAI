@@ -18,10 +18,16 @@
     - ✅ Weather source: Open-Meteo Historical API → NYC (lat=40.7128, lon=-74.0060), 2021-07-31 → 2026-04-13
     - ✅ EV Charging source: NYC PlugNYC Open Data (233,865 sessions, `Date, Connected Time, Disconnected Time, Energy Provided (kWh), Charge Duration (min)`)
     - ✅ `CFG` dataclass now includes `CITY`, `LAT`, `LON`, `DATA_START`, `DATA_END` constants
-8. **[NEXT] Run Full 200-Epoch Training on Colab T4**:
+8. **[COMPLETED] Run Full 200-Epoch Training on Colab T4**:
     - Upload repo to Google Drive → open `Latest_Training.txt` (rename to `.ipynb`) → Runtime: T4 GPU
     - Expected: ~8–12 hrs for 200 epochs on 5,000 samples
     - Monitor: R² should cross 0.9 by epoch 80; physics penalties should plateau by epoch 120
-13. **Algorithm Benchmarking**: Evaluate **Particle Swarm Optimization (PSO)** against the current Genetic Algorithm (GA) for placement optimization to see if "Global Empirical Range Embedding" (GERE) concepts improve convergence speed.
-14. **Refine Output Bounding**: Implement hard-clamping logic in the generation script to complement the soft penalties in `physics_loss.py`, ensuring 100% of generated scenarios are physically bounded before handoff.
-15. **[UPDATED] Train the Gen-Core (GCD-VAE)**: NYC data is now the sole training source — 5,000 bootstrapped NYC scenarios bootstrapped from 233,865 real sessions × 32 IEEE-33 nodes, weighted by NYC ATVC hourly traffic profile. Run `Latest_Training.txt` (rename to `.ipynb`) on Colab T4.
+9. **[COMPLETED] Documentation & Version Sync**:
+    - ✅ Created `Archives/Experiments.md`: Detailed setup for NYC-pivoted GCD-VAE.
+    - ✅ Created `Archives/Results.md`: Target performance metrics and constraint compliance placeholders.
+    - ✅ Performed `git rebase`: Branch `master` synced with `origin/master`.
+    - ✅ **[NEW] Repository Reorganization**: Consolidated files into `data_pipeline/`, `generative_core/`, and `scripts/`.
+    - ✅ **[NEW] README Suite**: Added `README.md` to every major directory for publication readiness.
+10. **Refine Output Bounding**: Implement hard-clamping logic in the generation script to complement the soft penalties in `physics_loss.py`, ensuring 100% of generated scenarios are physically bounded before handoff.
+11. **Algorithm Benchmarking**: Evaluate **Particle Swarm Optimization (PSO)** against the current Genetic Algorithm (GA) for placement optimization to see if "Global Empirical Range Embedding" (GERE) concepts improve convergence speed.
+12. **[UPDATED] Train the Gen-Core (GCD-VAE)**: NYC data is now the sole training source — 5,000 bootstrapped NYC scenarios bootstrapped from 233,865 real sessions × 32 IEEE-33 nodes, weighted by NYC ATVC hourly traffic profile. Run `Latest_Training.txt` (rename to `.ipynb`) on Colab T4.

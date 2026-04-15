@@ -4,7 +4,8 @@ Run from repo root: python3 build_notebook.py
 """
 import json, os
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+# Since this is in scripts/, root is one level up
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def code(src): 
     lines = src.split("\n")
