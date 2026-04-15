@@ -1,22 +1,29 @@
-# Core Dependencies (Machine Learning & Data)
-torch
+# ── Core ML (Colab installs torch automatically; listed for local reference) ──
+# torch
+# torchvision
+# torchaudio
+
+# ── Data & numerics ───────────────────────────────────────────────────────────
 pandas
 numpy
 pyarrow
 fastparquet
 scipy
+scikit-learn
+tqdm
+
+# ── Weather (Open-Meteo Historical API — no API key required) ────────────────
+openmeteo-requests
+requests-cache
+retry-requests
+
+# ── Visualisation ─────────────────────────────────────────────────────────────
 matplotlib
 
-# Geospatial & Network Analysis
-osmnx
-geopandas
-shapely
-folium
-
-# Dashboard & API (Integration Layer)
-fastapi
-uvicorn
-streamlit
-streamlit-folium
-python-dotenv
+# ── HTTP ──────────────────────────────────────────────────────────────────────
 requests
+
+# ── Geospatial (optional — dashboard / traffic map overlays only) ─────────────
+# osmnx
+# geopandas
+# shapely
