@@ -1,6 +1,6 @@
 # Future Steps
 
-> **Last Updated**: 2026-04-15 | **Geographic Focus**: New York City, NY (full pivot from California/Caltech)
+> **Last Updated**: 2026-04-29 | **Geographic Focus**: New York City, NY (full pivot from California/Caltech)
 
 1. **Test E2E Scenarios with Dashboard UI**: Launch the streamlit dashboard to verify that visual representations (Nodes, Gini Score maps) reflect `output/final_optimal_layout.json`.
 2. **Refine Subsystem Interfaces**: Ensure the shapes of demand tensors seamlessly cross the boundary from PyTorch Generation -> Risk GA -> Geospatial representation. If padding is required, consider re-orienting the datasets to conform exactly to IEEE 33-Bus configuration explicitly.
@@ -25,7 +25,7 @@
 9. **[COMPLETED] Documentation & Version Sync**:
     - ✅ Created `Archives/Experiments.md`: Detailed setup for NYC-pivoted GCD-VAE.
     - ✅ Created `Archives/Results.md`: Target performance metrics and constraint compliance placeholders.
-    - ✅ Performed `git rebase`: Branch `master` synced with `origin/master`.
+    - ✅ Performed git rebase: Branch master synced with origin/master (2026-04-29).
     - ✅ **[NEW] Repository Reorganization**: Consolidated files into `data_pipeline/`, `generative_core/`, and `scripts/`.
     - ✅ **[NEW] README Suite**: Added `README.md` to every major directory for publication readiness.
 10. **Refine Output Bounding**: Implement hard-clamping logic in the generation script to complement the soft penalties in `physics_loss.py`, ensuring 100% of generated scenarios are physically bounded before handoff.
