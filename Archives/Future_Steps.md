@@ -30,4 +30,12 @@
     - ✅ **[NEW] README Suite**: Added `README.md` to every major directory for publication readiness.
 10. **Refine Output Bounding**: Implement hard-clamping logic in the generation script to complement the soft penalties in `physics_loss.py`, ensuring 100% of generated scenarios are physically bounded before handoff.
 11. **Algorithm Benchmarking**: Evaluate **Particle Swarm Optimization (PSO)** against the current Genetic Algorithm (GA) for placement optimization to see if "Global Empirical Range Embedding" (GERE) concepts improve convergence speed.
-12. **[UPDATED] Train the Gen-Core (GCD-VAE)**: NYC data is now the sole training source — 5,000 bootstrapped NYC scenarios bootstrapped from 233,865 real sessions × 32 IEEE-33 nodes, weighted by NYC ATVC hourly traffic profile. Run `Latest_Training.txt` (rename to `.ipynb`) on Colab T4.
+13. **Optimization Strategy v2 (The "Green Light" Upgrades)**:
+    - 🟢 **Positional Encoding**: Inject sine/cosine "clock" to anchor temporal peaks.
+    - 🟢 **Peak Demand Loss**: Add penalty for `max(pred) - max(true)` to break smoothing.
+    - 🟢 **Seasonal Intelligence**: Add Summer/Winter flags to condition vector (`COND_DIM=8`).
+    - 🔴 **Constraint**: Maintain current model size (~4M params) to prevent obesity/collapse.
+    - See detailed implementation spec in [Optimization_v2_Strategy.md](file:///home/suzaykid/Projects/EVolvAI/Archives/Optimization_v2_Strategy.md).
+14. **Run Validation on Optimized Build**: 
+    - Goal: Reach $R^2 = 0.89+$ on NYC bootstrapped dataset.
+    - Monitor: Latent space health and physics constraint adherence.
