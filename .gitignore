@@ -41,3 +41,4 @@ data_pipeline/cache/
 .env
 __pycache__/
 *.pyc
+output.zip
