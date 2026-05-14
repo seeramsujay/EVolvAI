@@ -39,3 +39,10 @@
 14. **Run Validation on Optimized Build**: 
     - Goal: Reach $R^2 = 0.89+$ on NYC bootstrapped dataset.
     - Monitor: Latent space health and physics constraint adherence.
+15. **[COMPLETED] Manuscript Refinement**: 
+    - Addressed IRAI 2026 review panel feedback in `extracted_paper.txt`.
+    - Clarified dynamic Gini threshold during extreme shocks.
+    - Defined Epoch 50 $R^2=0.985$ baseline to quantify physics tax.
+    - Explicitly documented zero-output CVaR resampling.
+    - Explained NYC traffic-weighted geospatial bootstrapping heuristic.
+    - Completed bibliographical citations.
