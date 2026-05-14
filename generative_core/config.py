@@ -103,7 +103,7 @@ Raised from 128 → 512 to match the wider TCN and latent space."""
 LEARNING_RATE = 1e-3
 """float: Adam initial learning rate.  Drop to 1e-4 if training loss explodes."""
 
-EPOCHS = 150
+EPOCHS = 1000
 """int: Training epochs.  150 for isolation phase; raise to 1000+ for full physics run."""
 
 KLD_WEIGHT = 1.0

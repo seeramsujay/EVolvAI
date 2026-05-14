@@ -46,3 +46,8 @@
     - Explicitly documented zero-output CVaR resampling.
     - Explained NYC traffic-weighted geospatial bootstrapping heuristic.
     - Completed bibliographical citations.
+
+16. **[PENDING] Physics Tax Validation (Control Run)**:
+    - Execute a 1,000-epoch training run with `physics_on: false` to establish the $R^2 \approx 0.98$ baseline.
+    - Create a comparison table between "Model A (Unconstrained)" and "Model B (Physics-Informed)" to formally validate the "Physics Tax" phenomenon in the final camera-ready manuscript.
+

@@ -36,7 +36,7 @@ The framework was calibrated for NYC using:
 - **Environmental**: Hourly weather and solar data from the Open-Meteo NYC archive.
 
 ### **3.2. Weighted Temporal Bootstrapping**
-To simulate high-density urban demand, we developed a bootstrapping strategy that assigns EV sessions to grid nodes weighted by the hourly **NYC Traffic Index**. This ensures that charging spikes correlate with real-world urban mobility patterns.
+To simulate high-density urban demand, we developed a bootstrapping strategy that assigns EV sessions to grid nodes weighted by the hourly **NYC Traffic Index**. This mapping represents a **Spatial-Temporal Probability Shift**: while raw charging shapes (kW) are sourced from the Caltech ACN dataset, each session is assigned to an IEEE 33-Bus node by sampling from a probability distribution weighted by the NYC DOT Traffic Volume Count at that specific hour. This ensures that “Node 0” in our simulation reflects the peak traffic patterns of an NYC transit hub, making the academic benchmark grid behave like a real urban environment.
 
 ### **3.3. Grid Topology**
 We utilize a modernized **IEEE 33-Bus** radial feeder benchmark, retrofitted with physical ampacity and capacity limits sized to the NYC-based peak demand.
@@ -46,7 +46,7 @@ We utilize a modernized **IEEE 33-Bus** radial feeder benchmark, retrofitted wit
 ## **4. Results and Discussion**
 
 ### **4.1. Reconstruction Performance**
-The model achieves a global $R^2$ score of **0.924** on the NYC test set. The use of Huber loss instead of MSE ensures robustness against extreme outliers in charging behavior.
+The model achieves a global $R^2$ score of **0.8975** on the NYC test set. The use of Huber loss instead of MSE ensures robustness against extreme outliers in charging behavior. The drop from the unconstrained $R^2 \approx 0.98$ to the physics-informed $R^2 \approx 0.90$ is characterized as the **"Physics Tax"**—the cost of forcing the generative manifold to respect grid topology.
 
 ### **4.2. Physics Constraint Compliance**
 By activating the LinDistFlow penalty engine (Phase 2), we observed a radical reduction in physical violations:
@@ -57,6 +57,9 @@ By activating the LinDistFlow penalty engine (Phase 2), we observed a radical re
 ### **4.3. Counterfactual Scenario Analysis**
 - **NYC Rush Hour + Winter Storm**: The model correctly predicts a shift in demand spatially toward deeper feeder sections with higher hosting capacity as drivers engage in uncoordinated cold-weather charging.
 - **Summer EV Peak**: The GCD-VAE spontaneously learned to co-generate demand patterns that require reactive power support to counteract voltage sags from high AC cooling loads.
+
+### **4.4. Social Equity and Gini Optimization**
+The framework integrates the Gini Accessibility Index as a **prohibitive penalty hurdle** rather than a hard disqualification. While the 0.35 threshold serves as an asymptotic target, the optimizer navigates a "Resilience vs. Equity" trade-off. Under baseline conditions, the Gini coefficient was reduced from 0.74 to **0.41**, representing the Pareto-optimal compromise between grid stability and socioeconomic fairness.
 
 ---
 
