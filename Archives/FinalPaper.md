@@ -36,7 +36,7 @@ The framework was calibrated for NYC using:
 - **Environmental**: Hourly weather and solar data from the Open-Meteo NYC archive.
 
 ### **3.2. Weighted Temporal Bootstrapping**
-To simulate high-density urban demand, we developed a bootstrapping strategy that assigns EV sessions to grid nodes weighted by the hourly **NYC Traffic Index**. This mapping represents a **Spatial-Temporal Probability Shift**: while raw charging shapes (kW) are sourced from the Caltech ACN dataset, each session is assigned to an IEEE 33-Bus node by sampling from a probability distribution weighted by the NYC DOT Traffic Volume Count at that specific hour. This ensures that “Node 0” in our simulation reflects the peak traffic patterns of an NYC transit hub, making the academic benchmark grid behave like a real urban environment.
+To simulate high-density urban demand, we developed a bootstrapping strategy that assigns EV sessions to grid nodes weighted by the hourly **NYC Traffic Index**. This mapping represents a **Spatial-Temporal Probability Shift**: while raw charging shapes (kW) are sourced from the NYC PlugNYC dataset, each session is assigned to an IEEE 33-Bus node by sampling from a probability distribution weighted by the NYC DOT Traffic Volume Count at that specific hour. This ensures that “Node 0” in our simulation reflects the peak traffic patterns of an NYC transit hub, making the academic benchmark grid behave like a real urban environment.
 
 ### **3.3. Grid Topology**
 We utilize a modernized **IEEE 33-Bus** radial feeder benchmark, retrofitted with physical ampacity and capacity limits sized to the NYC-based peak demand.
@@ -46,7 +46,7 @@ We utilize a modernized **IEEE 33-Bus** radial feeder benchmark, retrofitted wit
 ## **4. Results and Discussion**
 
 ### **4.1. Reconstruction Performance**
-The model achieves a global $R^2$ score of **0.8975** on the NYC test set. The use of Huber loss instead of MSE ensures robustness against extreme outliers in charging behavior. The drop from the unconstrained $R^2 \approx 0.98$ to the physics-informed $R^2 \approx 0.90$ is characterized as the **"Physics Tax"**—the cost of forcing the generative manifold to respect grid topology.
+The model achieves a global $R^2$ score of **0.9946** on the NYC test set under unconstrained conditions. The use of Huber loss instead of MSE ensures robustness against extreme outliers in charging behavior. The drop from the unconstrained $R^2 \approx 0.99$ to the physics-informed $R^2 \approx 0.48$ is characterized as the **"Physics Tax"**—the cost of forcing the generative manifold to respect grid topology.
 
 ### **4.2. Physics Constraint Compliance**
 By activating the LinDistFlow penalty engine (Phase 2), we observed a radical reduction in physical violations:

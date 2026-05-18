@@ -1,0 +1,13 @@
+{
+  "city": "New York City, NY",
+  "data_start": "2021-07-31",
+  "data_end": "2026-04-13",
+  "total_params": 7735076,
+  "r2_final": 0.994619,
+  "mae_final": 0.051085,
+  "zero_pct": 0.0089,
+  "best_r2": 0.994554,
+  "best_epoch": 991,
+  "n_samples": 5000,
+  "epochs_run": 1000
+}
