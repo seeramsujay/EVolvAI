@@ -33,7 +33,7 @@ Archives/
 
 # Logs
 *.log
-*.txt
+logs/*.txt
 output/
 # Data
 data/
